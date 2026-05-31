@@ -817,7 +817,11 @@ BookMetadataCache::TocEntry Epub::getTocItem(const int tocIndex) const {
     return {};
   }
 
-  return bookMetadataCache->getTocEntry(tocIndex);
+  // Normalize the chapter title to NFC here so already-cached books (whose
+  // book.bin may hold NFD titles) also display correctly without re-indexing.
+  auto entry = bookMetadataCache->getTocEntry(tocIndex);
+  entry.title = utf8ComposeNfc(entry.title);
+  return entry;
 }
 
 int Epub::getTocItemsCount() const {
