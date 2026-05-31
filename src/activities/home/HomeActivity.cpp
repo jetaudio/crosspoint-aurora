@@ -119,6 +119,32 @@ void HomeActivity::onEnter() {
   const auto base = static_cast<int>(recentBooks.size());
   selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
 
+  // Aurora two-zone state: default to the content list. If this Home was opened
+  // targeting a specific destination (initialMenuItem), focus that bottom-bar tab.
+  homeZone = HomeZone::List;
+  homeListIndex = 0;
+  homeBarIndex = 0;
+  switch (initialMenuItem) {
+    case HomeMenuItem::FILE_BROWSER:
+      homeBarIndex = 0;
+      homeZone = HomeZone::Bar;
+      break;
+    case HomeMenuItem::RECENTS:
+      homeBarIndex = 1;
+      homeZone = HomeZone::Bar;
+      break;
+    case HomeMenuItem::SETTINGS_MENU:
+      homeBarIndex = 2;
+      homeZone = HomeZone::Bar;
+      break;
+    case HomeMenuItem::FILE_TRANSFER:
+      homeBarIndex = 3;
+      homeZone = HomeZone::Bar;
+      break;
+    default:
+      break;
+  }
+
   // Trigger first update
   requestUpdate();
 }
@@ -167,6 +193,60 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
+  // Aurora layout: two navigation zones. Up/Down (side buttons) browse the
+  // content list (featured card + library books); Left/Right (front buttons)
+  // move within the bottom bar. Confirm activates whichever zone is active.
+  if (GUI.ownsHomeLayout()) {
+    const int listCount = static_cast<int>(recentBooks.size());
+
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this, listCount] {
+      homeZone = HomeZone::List;
+      if (listCount > 0) homeListIndex = ButtonNavigator::previousIndex(homeListIndex, listCount);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this, listCount] {
+      homeZone = HomeZone::List;
+      if (listCount > 0) homeListIndex = ButtonNavigator::nextIndex(homeListIndex, listCount);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] {
+      homeZone = HomeZone::Bar;
+      homeBarIndex = ButtonNavigator::previousIndex(homeBarIndex, kHomeBarCount);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] {
+      homeZone = HomeZone::Bar;
+      homeBarIndex = ButtonNavigator::nextIndex(homeBarIndex, kHomeBarCount);
+      requestUpdate();
+    });
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (homeZone == HomeZone::List) {
+        if (homeListIndex >= 0 && homeListIndex < listCount) {
+          onSelectBook(recentBooks[homeListIndex].path);
+        }
+      } else {
+        switch (homeBarIndex) {
+          case 0:
+            onFileBrowserOpen();
+            break;
+          case 1:
+            onRecentsOpen();
+            break;
+          case 2:
+            onSettingsOpen();
+            break;
+          case 3:
+            onFileTransferOpen();
+            break;
+          default:
+            break;
+        }
+      }
+    }
+    return;
+  }
+
   const int menuCount = getMenuItemCount();
 
   buttonNavigator.onNext([this, menuCount] {
@@ -213,6 +293,41 @@ void HomeActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
+
+  // Themes that own the home layout (e.g. Aurora) render the whole screen
+  // themselves from the recent-books model plus the navigation actions. The
+  // selector/loop() navigation is shared: indices [0, recentBooks.size()) open a
+  // book, the rest map to the actions below in the same order.
+  if (GUI.ownsHomeLayout()) {
+    // Fixed bottom-bar destinations (matches homeBarIndex dispatch in loop()).
+    const std::vector<std::string> barLabels = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_SETTINGS_TITLE),
+                                                tr(STR_FILE_TRANSFER)};
+    const std::vector<UIIcon> barIcons = {Folder, Recent, Settings, Transfer};
+
+    // Reserve space for the front button hint row only when the user shows it.
+    const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
+    const int listSelected = homeZone == HomeZone::List ? homeListIndex : -1;
+    const int barSelected = homeZone == HomeZone::Bar ? homeBarIndex : -1;
+
+    GUI.drawHomeScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, recentBooks, barLabels, barIcons,
+                       listSelected, barSelected);
+
+    // Front hints: Back (unused on home), Select, and Left/Right move the bar.
+    const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), "<", ">");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+    renderer.displayBuffer();
+
+    if (!firstRenderDone) {
+      firstRenderDone = true;
+      requestUpdate();
+    } else if (!recentsLoaded && !recentsLoading) {
+      recentsLoading = true;
+      loadRecentCovers(metrics.homeCoverHeight);
+    }
+    return;
+  }
+
   bool bufferRestored = coverBufferStored && restoreCoverBuffer();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding},
