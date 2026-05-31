@@ -113,6 +113,49 @@ void SettingsActivity::onExit() {
 }
 
 void SettingsActivity::loop() {
+  // Aurora layout: side buttons Up/Down move between rows; front Left/Right change
+  // the selected setting's value (or cycle category when the category row is
+  // focused); Confirm activates action/picker rows; Back saves and exits.
+  if (GUI.ownsSettingsLayout()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      SETTINGS.saveToFile();
+      onGoHome();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (selectedSettingIndex > 0) {
+        toggleCurrentSetting();
+        requestUpdate();
+      }
+      return;
+    }
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] {
+      selectedSettingIndex = ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] {
+      selectedSettingIndex = ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] {
+      if (selectedSettingIndex == 0) {
+        changeCategory(-1);
+      } else {
+        adjustCurrentSetting(-1);
+      }
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] {
+      if (selectedSettingIndex == 0) {
+        changeCategory(1);
+      } else {
+        adjustCurrentSetting(1);
+      }
+      requestUpdate();
+    });
+    return;
+  }
+
   bool hasChangedCategory = false;
 
   // Handle actions with early return
@@ -279,6 +322,101 @@ void SettingsActivity::toggleCurrentSetting() {
   selectedSettingIndex = std::min(selectedSettingIndex, settingsCount);
 }
 
+std::string SettingsActivity::settingValueText(const SettingInfo& setting) const {
+  std::string valueText;
+  if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
+    valueText = (SETTINGS.*(setting.valuePtr)) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+  } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
+    const uint8_t value = SETTINGS.*(setting.valuePtr);
+    if (value < setting.enumValues.size()) {
+      valueText = I18N.get(setting.enumValues[value]);
+    }
+  } else if (setting.type == SettingType::ENUM && setting.valueGetter) {
+    const uint8_t value = setting.valueGetter();
+    if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
+      valueText = setting.enumStringValues[value];
+    } else if (value < setting.enumValues.size()) {
+      valueText = I18N.get(setting.enumValues[value]);
+    }
+  } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
+    if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
+      if (SETTINGS.sleepTimeoutMinutes >= CrossPointSettings::SLEEP_TIMEOUT_NEVER_MINUTES) {
+        valueText = tr(STR_SLEEP_NEVER);
+      } else {
+        char valueBuffer[32];
+        snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
+                 static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
+        valueText = valueBuffer;
+      }
+    } else {
+      valueText = std::to_string(SETTINGS.*(setting.valuePtr));
+    }
+  }
+  return valueText;
+}
+
+void SettingsActivity::adjustCurrentSetting(int direction) {
+  const int idx = selectedSettingIndex - 1;
+  if (idx < 0 || idx >= settingsCount) {
+    return;
+  }
+  const auto& setting = (*currentSettings)[idx];
+  const bool sleepScreenChanged = setting.valuePtr == &CrossPointSettings::sleepScreen;
+  const bool quickResumeTimeoutChanged = setting.valuePtr == &CrossPointSettings::quickResumeSleepScreen;
+
+  if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
+    return;  // edited via the Confirm picker
+  }
+  if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
+    SETTINGS.*(setting.valuePtr) = !(SETTINGS.*(setting.valuePtr));
+  } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
+    const int n = static_cast<int>(setting.enumValues.size());
+    if (n <= 0) return;
+    const int cur = SETTINGS.*(setting.valuePtr);
+    SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>((cur + direction + n) % n);
+  } else if (setting.type == SettingType::ENUM && setting.valueGetter && setting.valueSetter) {
+    if (setting.nameId == StrId::STR_FONT_FAMILY) {
+      return;  // chosen via the Confirm submenu
+    }
+    const int n = setting.enumStringValues.empty() ? static_cast<int>(setting.enumValues.size())
+                                                   : static_cast<int>(setting.enumStringValues.size());
+    if (n <= 0) return;
+    const int cur = setting.valueGetter();
+    setting.valueSetter(static_cast<uint8_t>((cur + direction + n) % n));
+  } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
+    const int step = setting.valueRange.step == 0 ? 1 : setting.valueRange.step;
+    int v = static_cast<int>(SETTINGS.*(setting.valuePtr)) + direction * step;
+    if (v > setting.valueRange.max) v = setting.valueRange.min;
+    if (v < setting.valueRange.min) v = setting.valueRange.max;
+    SETTINGS.*(setting.valuePtr) = static_cast<uint8_t>(v);
+  } else {
+    return;  // ACTION rows are activated with Confirm, not adjusted
+  }
+
+  syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
+  SETTINGS.saveToFile();
+}
+
+void SettingsActivity::changeCategory(int direction) {
+  selectedCategoryIndex = (direction > 0) ? ButtonNavigator::nextIndex(selectedCategoryIndex, categoryCount)
+                                          : ButtonNavigator::previousIndex(selectedCategoryIndex, categoryCount);
+  switch (selectedCategoryIndex) {
+    case 0:
+      currentSettings = &displaySettings;
+      break;
+    case 1:
+      currentSettings = &readerSettings;
+      break;
+    case 2:
+      currentSettings = &controlsSettings;
+      break;
+    case 3:
+      currentSettings = &systemSettings;
+      break;
+  }
+  settingsCount = static_cast<int>(currentSettings->size());
+}
+
 void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged) {
   if (quickResumeTimeoutChanged) {
     preserveQuickResumeTimeoutOn =
@@ -326,6 +464,36 @@ void SettingsActivity::render(RenderLock&&) {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
 
+  // Aurora owns the whole settings layout (status bar + category pills + value rows).
+  if (GUI.ownsSettingsLayout()) {
+    std::vector<std::string> categories;
+    categories.reserve(categoryCount);
+    for (int i = 0; i < categoryCount; ++i) {
+      categories.emplace_back(I18N.get(categoryNames[i]));
+    }
+    std::vector<std::string> names;
+    std::vector<std::string> values;
+    names.reserve(currentSettings->size());
+    values.reserve(currentSettings->size());
+    for (const auto& setting : *currentSettings) {
+      names.emplace_back(I18N.get(setting.nameId));
+      values.emplace_back(settingValueText(setting));
+    }
+
+    const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
+    GUI.drawSettingsScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, categories,
+                           selectedCategoryIndex, names, values, selectedSettingIndex);
+
+    // Front hints (4): Back, Select/open, and Left/Right adjust the value.
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "<", ">");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    // Side hints (2): Up/Down move between rows. Self-guarded by showButtonHints.
+    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+
+    renderer.displayBuffer();
+    return;
+  }
+
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SETTINGS_TITLE),
                  CROSSPOINT_VERSION);
 
@@ -345,39 +513,7 @@ void SettingsActivity::render(RenderLock&&) {
                          metrics.verticalSpacing * 2)},
       settingsCount, selectedSettingIndex - 1,
       [&settings](int index) { return std::string(I18N.get(settings[index].nameId)); }, nullptr, nullptr,
-      [&settings](int i) {
-        const auto& setting = settings[i];
-        std::string valueText = "";
-        if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
-          const bool value = SETTINGS.*(setting.valuePtr);
-          valueText = value ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-        } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
-          const uint8_t value = SETTINGS.*(setting.valuePtr);
-          valueText = I18N.get(setting.enumValues[value]);
-        } else if (setting.type == SettingType::ENUM && setting.valueGetter) {
-          const uint8_t value = setting.valueGetter();
-          if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
-            valueText = setting.enumStringValues[value];
-          } else if (value < setting.enumValues.size()) {
-            valueText = I18N.get(setting.enumValues[value]);
-          }
-        } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-          if (setting.nameId == StrId::STR_TIME_TO_SLEEP) {
-            char valueBuffer[32];
-            if (SETTINGS.sleepTimeoutMinutes >= CrossPointSettings::SLEEP_TIMEOUT_NEVER_MINUTES) {
-              valueText = tr(STR_SLEEP_NEVER);
-            } else {
-              snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT),
-                       static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
-              valueText = valueBuffer;
-            }
-          } else {
-            valueText = std::to_string(SETTINGS.*(setting.valuePtr));
-          }
-        }
-        return valueText;
-      },
-      true);
+      [this, &settings](int i) { return settingValueText(settings[i]); }, true);
 
   // Draw help text
   const auto confirmLabel =

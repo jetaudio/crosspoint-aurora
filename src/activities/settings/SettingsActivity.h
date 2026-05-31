@@ -164,6 +164,11 @@ class SettingsActivity final : public Activity {
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
+  // Aurora settings: Left/Right adjust the selected setting's value (dir -1/+1);
+  // changeCategory cycles the category; settingValueText formats a row's value.
+  void adjustCurrentSetting(int direction);
+  void changeCategory(int direction);
+  std::string settingValueText(const SettingInfo& setting) const;
   void openSleepTimeoutPicker();
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
