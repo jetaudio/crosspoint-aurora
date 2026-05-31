@@ -11,6 +11,10 @@ constexpr ThemeMetrics values = [] {
   // index 0 is the "Now Reading" featured card, the rest form the library list.
   v.homeRecentBooksCount = 6;
   v.homeContinueReadingInMenu = false;  // featured card is the continue-reading affordance
+  // Featured cover is drawn small (~100x150). Generate/cache the thumbnail at that
+  // height so drawBitmap blits it ~1:1 instead of crushing a 400px image down
+  // (nearest-neighbor downscale looked garbled).
+  v.homeCoverHeight = 150;
   return v;
 }();
 }  // namespace AuroraMetrics
