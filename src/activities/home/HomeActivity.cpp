@@ -199,6 +199,8 @@ void HomeActivity::loop() {
   if (GUI.ownsHomeLayout()) {
     const int listCount = static_cast<int>(recentBooks.size());
 
+    // Home is top-level: Back is inactive here (and hidden in the hints, like Lyra).
+
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this, listCount] {
       homeZone = HomeZone::List;
       if (listCount > 0) homeListIndex = ButtonNavigator::previousIndex(homeListIndex, listCount);
@@ -312,9 +314,11 @@ void HomeActivity::render(RenderLock&&) {
     GUI.drawHomeScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, recentBooks, barLabels, barIcons,
                        listSelected, barSelected);
 
-    // Front hints: Back (unused on home), Select, and Left/Right move the bar.
+    // Front hints: Back hidden on home (top-level, like Lyra); Select + Left/Right move the bar.
     const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), "<", ">");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    // Side hints (2): Up/Down browse the list. Self-guarded by showButtonHints.
+    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
     renderer.displayBuffer();
 

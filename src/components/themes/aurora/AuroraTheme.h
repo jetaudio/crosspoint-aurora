@@ -28,4 +28,9 @@ class AuroraTheme : public BaseTheme {
   void drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                       const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons, int listSelected,
                       int barSelected) const override;
+
+  bool ownsSettingsLayout() const override { return true; }
+  void drawSettingsScreen(GfxRenderer& renderer, Rect content, const std::vector<std::string>& categories,
+                          int activeCategory, const std::vector<std::string>& names,
+                          const std::vector<std::string>& values, int selectedIndex) const override;
 };

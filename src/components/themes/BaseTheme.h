@@ -215,6 +215,13 @@ class BaseTheme {
   // bottom bar (-1 if inactive). Exactly one zone is active at a time.
   virtual void drawHomeScreen(GfxRenderer&, Rect, const std::vector<RecentBook>&, const std::vector<std::string>&,
                               const std::vector<UIIcon>&, int /*listSelected*/, int /*barSelected*/) const {}
+  // Opt-in hook for themes that render the whole Settings screen themselves
+  // (status bar + category pills + value rows). Default themes keep the legacy
+  // header/tabbar/list layout. selectedIndex: 0 = category row, 1.. = setting row.
+  virtual bool ownsSettingsLayout() const { return false; }
+  virtual void drawSettingsScreen(GfxRenderer&, Rect, const std::vector<std::string>& /*categories*/,
+                                  int /*activeCategory*/, const std::vector<std::string>& /*names*/,
+                                  const std::vector<std::string>& /*values*/, int /*selectedIndex*/) const {}
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
