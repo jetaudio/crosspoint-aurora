@@ -315,7 +315,7 @@ void HomeActivity::render(RenderLock&&) {
                        listSelected, barSelected);
 
     // Front hints: Back hidden on home (top-level, like Lyra); Select + Left/Right move the bar.
-    const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), "<", ">");
+    const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     // Side hints (2): Up/Down browse the list. Self-guarded by showButtonHints.
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
