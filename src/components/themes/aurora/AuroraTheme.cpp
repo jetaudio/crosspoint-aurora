@@ -27,8 +27,8 @@
 namespace {
 constexpr int kStatusY = 12;       // Status bar text baseline (top of cell)
 constexpr int kDividerGap = 26;    // Distance from status text to the divider line
-constexpr int kThumbHeight = 150;  // Featured cover thumbnail height
-constexpr int kThumbWidth = 100;   // Featured cover thumbnail width (~2:3)
+constexpr int kThumbHeight = 240;  // Featured cover thumbnail height (large, Lyra-style)
+constexpr int kThumbWidth = 160;   // Featured cover thumbnail width (~2:3)
 constexpr int kTextGap = 16;       // Gap between thumbnail and title block
 constexpr int kIconSize = 32;      // Placeholder cover glyph / bottom-bar icon size
 constexpr int kSectionGap = 28;    // Gap above the "Library" header
@@ -125,16 +125,20 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     }
     renderer.drawRect(thumbX, thumbY, kThumbWidth, kThumbHeight);
 
-    // Title + author block to the right of the cover.
+    // Title + author block to the right of the cover, vertically centered against
+    // the tall cover.
     const int txtX = thumbX + kThumbWidth + kTextGap;
     const int txtW = W - P - txtX;
-    int textY = thumbY + 4;
     const auto titleLines = renderer.wrappedText(kTitleFontId, book.title.c_str(), txtW, 3, EpdFontFamily::BOLD);
+    const bool hasAuthor = !book.author.empty();
+    int blockHeight = static_cast<int>(titleLines.size()) * renderer.getLineHeight(kTitleFontId);
+    if (hasAuthor) blockHeight += renderer.getLineHeight(kBodyFontId) + 6;
+    int textY = thumbY + std::max(4, (kThumbHeight - blockHeight) / 2);
     for (const auto& line : titleLines) {
       renderer.drawText(kTitleFontId, txtX, textY, line.c_str(), true, EpdFontFamily::BOLD);
       textY += renderer.getLineHeight(kTitleFontId);
     }
-    if (!book.author.empty()) {
+    if (hasAuthor) {
       textY += 6;
       const auto author = renderer.truncatedText(kBodyFontId, book.author.c_str(), txtW);
       renderer.drawText(kBodyFontId, txtX, textY, author.c_str());
@@ -300,6 +304,123 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
       int xr[3] = {rTip, rTip - kSettingArrow, rTip - kSettingArrow};
       int yr[3] = {cy, cy - 5, cy + 5};
       renderer.fillPolygon(xr, yr, 3, true);
+    }
+  }
+}
+
+void AuroraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
+  const auto& m = AuroraMetrics::values;
+  const int P = m.contentSidePadding;
+
+  // Battery (right), like the Aurora home/settings status bar.
+  const bool showBatteryPercentage =
+      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
+  drawBatteryRight(renderer,
+                   Rect{rect.x + rect.width - P - m.batteryWidth, rect.y + 8, m.batteryWidth, m.batteryHeight},
+                   showBatteryPercentage);
+
+  // Title (left, bold) — Aurora uses a left-aligned status-bar title, not centered.
+  if (title != nullptr) {
+    const int titleY = rect.y + (rect.height - renderer.getLineHeight(kTitleFontId)) / 2;
+    const int rightReserve = P + m.batteryWidth + 52;  // battery icon + "NN%"
+    const int maxW = std::max(20, (rect.x + rect.width - rightReserve) - (rect.x + P));
+    const auto t = renderer.truncatedText(kTitleFontId, title, maxW, EpdFontFamily::BOLD);
+    renderer.drawText(kTitleFontId, rect.x + P, titleY, t.c_str(), true, EpdFontFamily::BOLD);
+  }
+
+  // Divider rule at the bottom of the header band.
+  renderer.drawLine(rect.x, rect.y + rect.height, rect.x + rect.width, rect.y + rect.height);
+
+  // Optional subtitle (rare): small, right-aligned just under the header.
+  if (subtitle != nullptr) {
+    const auto s = renderer.truncatedText(SMALL_FONT_ID, subtitle, rect.width - P * 2, EpdFontFamily::REGULAR);
+    const int sw = renderer.getTextWidth(SMALL_FONT_ID, s.c_str());
+    renderer.drawText(SMALL_FONT_ID, rect.x + rect.width - P - sw, rect.y + rect.height + 5, s.c_str(), true);
+  }
+}
+
+void AuroraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                           const std::function<std::string(int index)>& rowTitle,
+                           const std::function<std::string(int index)>& rowSubtitle,
+                           const std::function<UIIcon(int index)>& /*rowIcon*/,
+                           const std::function<std::string(int index)>& rowValue, bool /*highlightValue*/,
+                           const std::function<bool(int index)>& rowDimmed) const {
+  const auto& m = AuroraMetrics::values;
+  const int P = m.contentSidePadding;
+  const int rowHeight = (rowSubtitle != nullptr) ? m.listWithSubtitleRowHeight : m.listRowHeight;
+  const int pageItems = rowHeight > 0 ? rect.height / rowHeight : 0;
+  if (pageItems <= 0) return;
+
+  // Page up/down arrows on the right when there is more than one page.
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  if (totalPages > 1) {
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+    const int centerX = rect.x + rect.width - 10 - margin;
+    const int indicatorTop = rect.y;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + i * 2;
+      renderer.drawLine(centerX - i, indicatorTop + i, centerX - i + lineWidth - 1, indicatorTop + i);
+    }
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+      const int startX = centerX - (arrowSize - 1 - i);
+      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                        indicatorBottom - arrowSize + 1 + i);
+    }
+  }
+
+  const int contentWidth = rect.width - 5;
+  const int pageStartIndex = (selectedIndex >= 0 ? selectedIndex : 0) / pageItems * pageItems;
+
+  // Aurora selection: a rounded light-gray pill (vs the base theme's inverted bar),
+  // so row text stays black instead of inverting.
+  if (selectedIndex >= 0) {
+    const int selY = rect.y + (selectedIndex % pageItems) * rowHeight - 2;
+    renderer.fillRoundedRect(rect.x + P - 6, selY, rect.width - 2 * (P - 6), rowHeight, 10, Color::LightGray);
+  }
+
+  constexpr int minValueGap = 10;
+  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; ++i) {
+    const int itemY = rect.y + (i % pageItems) * rowHeight;
+
+    int rowTextWidth = contentWidth - P * 2;
+    std::string valueText;
+    if (rowValue != nullptr) {
+      valueText = rowValue(i);
+      if (!valueText.empty()) {
+        const int maxValW = std::max(0, rowTextWidth - 40 - minValueGap);
+        valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxValW);
+        rowTextWidth -= renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + minValueGap;
+      }
+    }
+
+    const auto item = renderer.truncatedText(UI_10_FONT_ID, rowTitle(i).c_str(), rowTextWidth);
+    renderer.drawText(UI_10_FONT_ID, rect.x + P, itemY, item.c_str(), true);
+
+    // Dimmed rows: checkerboard dither for a gray-text effect.
+    if (rowDimmed && rowDimmed(i)) {
+      const int titleWidth = renderer.getTextWidth(UI_10_FONT_ID, item.c_str());
+      const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+      const int tx = rect.x + P;
+      for (int py = itemY; py < itemY + lineH; ++py)
+        for (int px = tx; px < tx + titleWidth; ++px)
+          if ((px + py) % 2 == 0) renderer.drawPixel(px, py, false);
+    }
+
+    if (rowSubtitle != nullptr) {
+      const std::string subtitleText = rowSubtitle(i);
+      if (!subtitleText.empty()) {
+        const auto subtitle = renderer.truncatedText(SMALL_FONT_ID, subtitleText.c_str(), rowTextWidth);
+        renderer.drawText(SMALL_FONT_ID, rect.x + P, itemY + 24, subtitle.c_str(), true);
+      }
+    }
+
+    if (!valueText.empty()) {
+      const int vw = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
+      const int valueY = (rowSubtitle != nullptr) ? itemY + 10 : itemY;
+      renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - P - vw, valueY, valueText.c_str(), true);
     }
   }
 }
