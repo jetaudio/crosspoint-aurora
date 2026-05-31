@@ -10,8 +10,19 @@ struct RecentBook;
 struct Rect;
 
 class HomeActivity final : public Activity {
+ public:
+  // Active navigation zone for themes that own the home layout (Aurora): Up/Down
+  // browse the content List; Left/Right move within the bottom Bar.
+  enum class HomeZone { List, Bar };
+
+ private:
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
+  // Aurora two-zone navigation state (unused by legacy themes).
+  HomeZone homeZone = HomeZone::List;
+  int homeListIndex = 0;  // 0 = featured "Now Reading" card, 1.. = library row
+  int homeBarIndex = 0;   // bottom bar tab (0=Browse,1=Recents,2=Settings,3=Transfer)
+  static constexpr int kHomeBarCount = 4;
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;

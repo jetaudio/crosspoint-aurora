@@ -156,6 +156,11 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
+  // User can hide the on-screen button hint row for a cleaner layout.
+  if (!SETTINGS.showButtonHints) {
+    return;
+  }
+
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 

@@ -161,7 +161,7 @@ class CrossPointSettings {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, AURORA = 4 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -212,6 +212,9 @@ class CrossPointSettings {
   uint8_t frontButtonLayout = BACK_CONFIRM_LEFT_RIGHT;
   uint8_t sideButtonLayout = PREV_NEXT;
   uint8_t frontButtonFollowOrientation = 0;
+  // Show the on-screen front button hint row (1 = show, 0 = hide). Lets users
+  // hide the hints for a cleaner layout (e.g. the Aurora theme's bottom bar).
+  uint8_t showButtonHints = 1;
   // Front button remap (logical -> hardware)
   // Used by MappedInputManager to translate logical buttons into physical front buttons.
   uint8_t frontButtonBack = FRONT_HW_BACK;

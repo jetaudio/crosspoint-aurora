@@ -203,6 +203,18 @@ class BaseTheme {
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;
+  // Opt-in hook for themes that render the entire home screen themselves (status
+  // bar + featured card + library list) instead of the default
+  // header/cover/button-menu layout driven by HomeActivity. Default themes return
+  // false and keep the legacy path untouched.
+  virtual bool ownsHomeLayout() const { return false; }
+  // Draws the whole home screen: a "Now Reading" featured card, a library list of
+  // recent books, and a bottom navigation bar (barLabels/barIcons). Navigation has
+  // two zones: listSelected indexes the vertical content list (0 = featured card,
+  // 1.. = library rows; -1 if that zone is inactive); barSelected indexes the
+  // bottom bar (-1 if inactive). Exactly one zone is active at a time.
+  virtual void drawHomeScreen(GfxRenderer&, Rect, const std::vector<RecentBook>&, const std::vector<std::string>&,
+                              const std::vector<UIIcon>&, int /*listSelected*/, int /*barSelected*/) const {}
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
