@@ -35,12 +35,15 @@ constexpr int kSectionGap = 28;    // Gap above the "Library" header
 constexpr int kBottomBarHeight = 70;
 constexpr int kPillHeight = 30;        // Settings category pill height
 constexpr int kPillGap = 8;            // Gap between category pills
-constexpr int kSettingRowHeight = 44;  // Settings value row height
+constexpr int kSettingRowHeight = 40;  // Settings value row height
 constexpr int kSettingValueCol = 150;  // Reserved width for the right value column
 constexpr int kSettingArrow = 7;       // Triangle arrow size for adjustable values
 constexpr int kHeaderFontId = UI_10_FONT_ID;
 constexpr int kTitleFontId = UI_12_FONT_ID;
 constexpr int kBodyFontId = UI_10_FONT_ID;
+// Settings rows use UI_10 (not the larger UI_12 of home/list titles) so the screen
+// reads compact and refined rather than chunky -- the name matches the value size.
+constexpr int kSettingNameFontId = UI_10_FONT_ID;
 constexpr int kBarLabelFontId = SMALL_FONT_ID;
 constexpr int kCaptionFontId = SMALL_FONT_ID;
 
@@ -274,9 +277,10 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
       renderer.fillRoundedRect(rowLeft, y + 3, rowRight - rowLeft, kSettingRowHeight - 6, 12, Color::LightGray);
     }
 
-    const auto name = renderer.truncatedText(kTitleFontId, names[i].c_str(), nameMaxWidth, style);
-    renderer.drawText(kTitleFontId, P + 6, y + (kSettingRowHeight - renderer.getLineHeight(kTitleFontId)) / 2,
-                      name.c_str(), true, style);
+    const auto name = renderer.truncatedText(kSettingNameFontId, names[i].c_str(), nameMaxWidth, style);
+    renderer.drawText(kSettingNameFontId, P + 6,
+                      y + (kSettingRowHeight - renderer.getLineHeight(kSettingNameFontId)) / 2, name.c_str(), true,
+                      style);
 
     const std::string& val = values[i];
     if (!val.empty()) {
