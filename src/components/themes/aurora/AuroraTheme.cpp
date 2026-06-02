@@ -284,23 +284,13 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
     }
   }
 
-  int y = listTop;
-  for (int i = pageStart; i < pageEnd; ++i) {
-    const SettingsListItem& it = items[i];
-    const int h = itemH(i);
-    if (y + h > listBottom) break;
-
-    if (it.isHeader) {
-      const int ty = y + headerH - renderer.getLineHeight(kCaptionFontId) - 2;
-      renderer.drawText(kCaptionFontId, P + 2, ty, it.text.c_str(), true, EpdFontFamily::BOLD);
-      y += h;
-      continue;
-    }
-
-    const int cy = y + rowH / 2;
+  // Draw one value row at vertical position rowY (inside a group card).
+  auto drawRow = [&](const SettingsListItem& it, int rowY) {
+    const int cy = rowY + rowH / 2;
     const auto style = it.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
     if (it.selected) {
-      renderer.fillRoundedRect(rowLeft, y + 3, rowRight - rowLeft, rowH - 6, 12, Color::LightGray);
+      // Inset so the highlight stays inside the card border.
+      renderer.fillRoundedRect(rowLeft + 2, rowY + 2, (rowRight - rowLeft) - 4, rowH - 4, 10, Color::LightGray);
     }
 
     // Right-aligned ▸ chevron (signals "Select opens/changes this row").
@@ -317,16 +307,46 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
     if (!it.value.empty()) {
       const auto vTrunc = renderer.truncatedText(kBodyFontId, it.value.c_str(), kSettingValueCol, style);
       const int vw = renderer.getTextWidth(kBodyFontId, vTrunc.c_str(), style);
-      const int vy = y + (rowH - renderer.getLineHeight(kBodyFontId)) / 2;
+      const int vy = rowY + (rowH - renderer.getLineHeight(kBodyFontId)) / 2;
       renderer.drawText(kBodyFontId, contentRightX - vw, vy, vTrunc.c_str(), true, style);
       contentRightX -= vw + 10;
     }
 
-    const int nameMaxWidth = std::max(40, contentRightX - (P + 6));
+    const int nameMaxWidth = std::max(40, contentRightX - (P + 8));
     const auto name = renderer.truncatedText(kSettingNameFontId, it.text.c_str(), nameMaxWidth, style);
-    renderer.drawText(kSettingNameFontId, P + 6, y + (rowH - renderer.getLineHeight(kSettingNameFontId)) / 2,
+    renderer.drawText(kSettingNameFontId, P + 8, rowY + (rowH - renderer.getLineHeight(kSettingNameFontId)) / 2,
                       name.c_str(), true, style);
-    y += h;
+  };
+
+  // Each group renders as a bold uppercase label above a rounded card that boxes
+  // its rows (with thin separators between them), like the reference design.
+  int y = listTop;
+  int i = pageStart;
+  while (i < pageEnd) {
+    if (y + itemH(i) > listBottom) break;
+
+    if (items[i].isHeader) {
+      renderer.drawText(kCaptionFontId, P + 2, y + 8, items[i].text.c_str(), true, EpdFontFamily::BOLD);
+      y += headerH;
+      ++i;
+      continue;
+    }
+
+    const int cardTop = y;
+    int rows = 0;
+    while (i < pageEnd && !items[i].isHeader && y + rowH <= listBottom) {
+      drawRow(items[i], y);
+      y += rowH;
+      ++i;
+      ++rows;
+    }
+    if (rows > 0) {
+      renderer.drawRoundedRect(rowLeft, cardTop, rowRight - rowLeft, rows * rowH, 1, 12, true);
+      for (int k = 1; k < rows; ++k) {
+        const int sy = cardTop + k * rowH;
+        renderer.drawLine(rowLeft + 10, sy, rowRight - 10, sy);
+      }
+    }
   }
 }
 
