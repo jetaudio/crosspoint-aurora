@@ -3,7 +3,9 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "activities/util/HomeTabBar.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -30,6 +32,10 @@ void NetworkModeSelectionActivity::loop() {
     return;
   }
 
+  // Aurora: this is the Transfer tab's landing screen, so Left/Right switch tabs.
+  const bool tabMode = GUI.ownsHomeLayout();
+  if (tabMode && HomeTabBar::handleLeftRight(mappedInput, HomeTabBar::Transfer)) return;
+
   // Handle confirm button - select current option
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     NetworkMode mode = NetworkMode::JOIN_NETWORK;
@@ -42,7 +48,19 @@ void NetworkModeSelectionActivity::loop() {
     return;
   }
 
-  // Handle navigation
+  // Navigation: side Up/Down (front Left/Right are reserved for tabs in Aurora).
+  if (tabMode) {
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] {
+      selectedIndex = ButtonNavigator::previousIndex(selectedIndex, MENU_ITEM_COUNT);
+      requestUpdate();
+    });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] {
+      selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEM_COUNT);
+      requestUpdate();
+    });
+    return;
+  }
+
   buttonNavigator.onNext([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEM_COUNT);
     requestUpdate();
@@ -61,10 +79,17 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FILE_TRANSFER));
+  // Aurora draws the persistent tab bar here (Transfer tab) and only reserves the
+  // hint row the user actually shows.
+  const bool tabMode = GUI.ownsHomeLayout();
+  const int barH = tabMode ? GUI.bottomBarHeight() : 0;
+  const int hintH = (tabMode && !SETTINGS.showButtonHints) ? 0 : metrics.buttonHintsHeight;
+
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+                 tabMode ? tr(STR_TAB_TRANSFER) : tr(STR_FILE_TRANSFER));
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  const int contentHeight = pageHeight - contentTop - hintH - metrics.verticalSpacing * 2 - barH;
   // Menu items and descriptions
   static constexpr StrId menuItems[MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
                                                        StrId::STR_CREATE_HOTSPOT};
@@ -78,8 +103,15 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
       [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
 
   // Draw help text at bottom
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (tabMode) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    HomeTabBar::draw(renderer, pageWidth, pageHeight, HomeTabBar::Transfer);
+  } else {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   renderer.displayBuffer();
 }
