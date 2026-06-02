@@ -23,6 +23,17 @@ struct TabInfo {
   bool selected;
 };
 
+// One entry in a sectioned settings list (see drawSettingsScreen). A header row
+// renders a small uppercase section label; a value row renders name + value
+// (+ optional ▸ chevron) and may be the selected row.
+struct SettingsListItem {
+  bool isHeader = false;
+  std::string text;          // section label (header) or setting name (row)
+  std::string value;         // setting value text (row only; empty for actions)
+  bool selected = false;     // row is currently selected
+  bool showChevron = false;  // draw a ▸ affordance (actions / submenu entries)
+};
+
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -209,23 +220,30 @@ class BaseTheme {
   // false and keep the legacy path untouched.
   virtual bool ownsHomeLayout() const { return false; }
   // Draws the whole home screen: a "Now Reading" featured card, a library list of
-  // recent books, and a bottom navigation bar (barLabels/barIcons). Navigation has
-  // two zones: listSelected indexes the vertical content list (0 = featured card,
-  // 1.. = library rows; -1 if that zone is inactive); barSelected indexes the
-  // bottom bar and is always valid (the remembered tab), even when the list zone
-  // is active. barFocused tells whether the bottom bar is the active zone: when
-  // focused it draws a solid highlight, when unfocused it draws an outline box
-  // marking where focus will return. Exactly one zone is active at a time.
+  // recent books, and the persistent bottom navigation bar (barLabels/barIcons).
+  // listSelected indexes the vertical content list (0 = featured card, 1.. =
+  // library rows; -1 if nothing is selected). activeTab is the bottom-bar tab to
+  // highlight (the Library tab when on Home).
   virtual void drawHomeScreen(GfxRenderer&, Rect, const std::vector<RecentBook>&, const std::vector<std::string>&,
-                              const std::vector<UIIcon>&, int /*listSelected*/, int /*barSelected*/,
-                              bool /*barFocused*/) const {}
+                              const std::vector<UIIcon>&, int /*listSelected*/, int /*activeTab*/) const {}
+
+  // Height (px) of the persistent bottom navigation bar, or 0 for themes that
+  // don't draw one. Activities reserve this much at the bottom of their content.
+  virtual int bottomBarHeight() const { return 0; }
+  // Draws the persistent bottom navigation bar inside barRect: one icon+label
+  // slot per tab, with a highlight on activeTab. No-op for themes without a bar.
+  virtual void drawBottomBar(GfxRenderer&, Rect /*barRect*/, const std::vector<std::string>& /*labels*/,
+                             const std::vector<UIIcon>& /*icons*/, int /*activeTab*/) const {}
+
   // Opt-in hook for themes that render the whole Settings screen themselves
-  // (status bar + category pills + value rows). Default themes keep the legacy
-  // header/tabbar/list layout. selectedIndex: 0 = category row, 1.. = setting row.
+  // (status bar + sectioned value list). Default themes keep the legacy
+  // header/tabbar/list layout.
   virtual bool ownsSettingsLayout() const { return false; }
-  virtual void drawSettingsScreen(GfxRenderer&, Rect, const std::vector<std::string>& /*categories*/,
-                                  int /*activeCategory*/, const std::vector<std::string>& /*names*/,
-                                  const std::vector<std::string>& /*values*/, int /*selectedIndex*/) const {}
+  // Draws a settings screen as a flat, section-grouped list (no category tabs).
+  // `title` is the status-bar title; `items` is the interleaved list of section
+  // headers and value rows in display order.
+  virtual void drawSettingsScreen(GfxRenderer&, Rect, const char* /*title*/,
+                                  const std::vector<SettingsListItem>& /*items*/) const {}
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;

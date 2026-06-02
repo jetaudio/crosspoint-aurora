@@ -91,6 +91,9 @@ class ActivityManager {
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();
   void goHome(HomeMenuItem initialMenuItem = HomeMenuItem::NONE);
+  // Switch to one of the persistent bottom-bar tabs (0=Library/Home, 1=Browse,
+  // 2=Settings, 3=Transfer); see HomeTabBar::Tab.
+  void goToHomeTab(int tab);
 
   // This will move current activity to stack instead of deleting it
   void pushActivity(std::unique_ptr<Activity>&& activity);

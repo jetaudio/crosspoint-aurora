@@ -4,6 +4,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -22,6 +23,7 @@
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/HomeTabBar.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -87,6 +89,9 @@ void SettingsActivity::rebuildSettingsLists() {
       break;
   }
   settingsCount = static_cast<int>(currentSettings->size());
+
+  // Aurora renders a flat sectioned list built from the same category data.
+  if (GUI.ownsSettingsLayout()) buildAuroraEntries();
 }
 
 void SettingsActivity::onEnter() {
@@ -95,6 +100,7 @@ void SettingsActivity::onEnter() {
   // Reset selection to first category
   selectedCategoryIndex = 0;
   selectedSettingIndex = 0;
+  auroraSelected = 0;
   preserveQuickResumeTimeoutOn =
       SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT;
   quickResumeTimeoutAutoEnabled = false;
@@ -113,46 +119,44 @@ void SettingsActivity::onExit() {
 }
 
 void SettingsActivity::loop() {
-  // Aurora layout: side buttons Up/Down move between rows; front Left/Right change
-  // the selected setting's value (or cycle category when the category row is
-  // focused); Confirm activates action/picker rows; Back saves and exits.
+  // Aurora layout: flat sectioned list. Up/Down move between rows; Select
+  // toggles/cycles/opens the row; front Left/Right switch tabs (top-level page
+  // only); Back saves and exits (to the Library tab, or to the Settings tab when
+  // on the Advanced sub-page).
   if (GUI.ownsSettingsLayout()) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       SETTINGS.saveToFile();
-      onGoHome();
+      if (advancedPage) {
+        finish();
+      } else {
+        onGoHome();
+      }
+      return;
+    }
+    if (!advancedPage && (mappedInput.wasReleased(MappedInputManager::Button::Left) ||
+                          mappedInput.wasReleased(MappedInputManager::Button::Right))) {
+      SETTINGS.saveToFile();
+      HomeTabBar::handleLeftRight(mappedInput, HomeTabBar::Settings);
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (selectedSettingIndex > 0) {
-        toggleCurrentSetting();
+      const SettingInfo* setting = auroraSelectedSetting();
+      if (setting != nullptr) {
+        activateSetting(*setting);
         requestUpdate();
       }
       return;
     }
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] {
-      selectedSettingIndex = ButtonNavigator::previousIndex(selectedSettingIndex, settingsCount + 1);
-      requestUpdate();
-    });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] {
-      selectedSettingIndex = ButtonNavigator::nextIndex(selectedSettingIndex, settingsCount + 1);
-      requestUpdate();
-    });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] {
-      if (selectedSettingIndex == 0) {
-        changeCategory(-1);
-      } else {
-        adjustCurrentSetting(-1);
-      }
-      requestUpdate();
-    });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] {
-      if (selectedSettingIndex == 0) {
-        changeCategory(1);
-      } else {
-        adjustCurrentSetting(1);
-      }
-      requestUpdate();
-    });
+    if (auroraSelectableCount > 0) {
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this] {
+        auroraSelected = ButtonNavigator::previousIndex(auroraSelected, auroraSelectableCount);
+        requestUpdate();
+      });
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this] {
+        auroraSelected = ButtonNavigator::nextIndex(auroraSelected, auroraSelectableCount);
+        requestUpdate();
+      });
+    }
     return;
   }
 
@@ -226,12 +230,12 @@ void SettingsActivity::loop() {
 }
 
 void SettingsActivity::toggleCurrentSetting() {
-  int selectedSetting = selectedSettingIndex - 1;
-  if (selectedSetting < 0 || selectedSetting >= settingsCount) {
-    return;
-  }
+  const int selectedSetting = selectedSettingIndex - 1;
+  if (selectedSetting < 0 || selectedSetting >= settingsCount) return;
+  activateSetting((*currentSettings)[selectedSetting]);
+}
 
-  const auto& setting = (*currentSettings)[selectedSetting];
+void SettingsActivity::activateSetting(const SettingInfo& setting) {
   const bool sleepScreenChanged = setting.valuePtr == &CrossPointSettings::sleepScreen;
   const bool quickResumeTimeoutChanged = setting.valuePtr == &CrossPointSettings::quickResumeSleepScreen;
 
@@ -306,6 +310,10 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::OpenAdvanced:
+        startActivityForResult(std::make_unique<SettingsActivity>(renderer, mappedInput, /*advanced=*/true),
+                               [](const ActivityResult&) {});
         break;
       case SettingAction::None:
         // Do nothing
@@ -456,6 +464,97 @@ void SettingsActivity::openSleepTimeoutPicker() {
       });
 }
 
+bool SettingsActivity::isTopLevelSetting(StrId nameId) {
+  switch (nameId) {
+    case StrId::STR_FONT_FAMILY:
+    case StrId::STR_MANAGE_FONTS:
+    case StrId::STR_FONT_SIZE:
+    case StrId::STR_LINE_SPACING:
+    case StrId::STR_SCREEN_MARGIN:
+    case StrId::STR_PARA_ALIGNMENT:
+    case StrId::STR_UI_THEME:
+    case StrId::STR_SLEEP_SCREEN:
+    case StrId::STR_REFRESH_FREQ:
+    case StrId::STR_SHOW_BUTTON_HINTS:
+    case StrId::STR_WIFI_NETWORKS:
+    case StrId::STR_TIME_TO_SLEEP:
+    case StrId::STR_LANGUAGE:
+    case StrId::STR_CHECK_UPDATES:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void SettingsActivity::buildAuroraEntries() {
+  auroraEntries.clear();
+
+  const std::vector<SettingInfo>* cats[] = {&displaySettings, &readerSettings, &controlsSettings, &systemSettings};
+  auto findByName = [&](StrId id) -> const SettingInfo* {
+    for (const auto* vec : cats)
+      for (const auto& s : *vec)
+        if (s.nameId == id) return &s;
+    return nullptr;
+  };
+  auto addSection = [&](StrId header, std::initializer_list<StrId> ids) {
+    bool headerAdded = false;
+    for (StrId id : ids) {
+      const SettingInfo* s = findByName(id);
+      if (s == nullptr) continue;
+      if (!headerAdded) {
+        auroraEntries.push_back(AuroraEntry{true, header, {}});
+        headerAdded = true;
+      }
+      auroraEntries.push_back(AuroraEntry{false, StrId::STR_NONE_OPT, *s});
+    }
+  };
+
+  if (!advancedPage) {
+    // Curated, important settings grouped into Reading / Display / Device.
+    addSection(StrId::STR_CAT_READER, {StrId::STR_FONT_FAMILY, StrId::STR_MANAGE_FONTS, StrId::STR_FONT_SIZE,
+                                       StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
+    addSection(StrId::STR_CAT_DISPLAY,
+               {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ, StrId::STR_SHOW_BUTTON_HINTS});
+    addSection(StrId::STR_CAT_DEVICE,
+               {StrId::STR_WIFI_NETWORKS, StrId::STR_TIME_TO_SLEEP, StrId::STR_LANGUAGE, StrId::STR_CHECK_UPDATES});
+    // Everything else lives behind this entry.
+    auroraEntries.push_back(AuroraEntry{
+        false, StrId::STR_NONE_OPT, SettingInfo::Action(StrId::STR_ADVANCED_SETTINGS, SettingAction::OpenAdvanced)});
+  } else {
+    // Advanced page: all non-top-level settings, grouped by their category.
+    auto addRemaining = [&](StrId header, const std::vector<SettingInfo>& vec) {
+      bool headerAdded = false;
+      for (const auto& s : vec) {
+        if (isTopLevelSetting(s.nameId)) continue;
+        if (!headerAdded) {
+          auroraEntries.push_back(AuroraEntry{true, header, {}});
+          headerAdded = true;
+        }
+        auroraEntries.push_back(AuroraEntry{false, StrId::STR_NONE_OPT, s});
+      }
+    };
+    addRemaining(StrId::STR_CAT_DISPLAY, displaySettings);
+    addRemaining(StrId::STR_CAT_READER, readerSettings);
+    addRemaining(StrId::STR_CAT_CONTROLS, controlsSettings);
+    addRemaining(StrId::STR_CAT_SYSTEM, systemSettings);
+  }
+
+  auroraSelectableCount = 0;
+  for (const auto& e : auroraEntries)
+    if (!e.isHeader) ++auroraSelectableCount;
+  if (auroraSelected >= auroraSelectableCount) auroraSelected = std::max(0, auroraSelectableCount - 1);
+}
+
+const SettingInfo* SettingsActivity::auroraSelectedSetting() const {
+  int row = 0;
+  for (const auto& e : auroraEntries) {
+    if (e.isHeader) continue;
+    if (row == auroraSelected) return &e.setting;
+    ++row;
+  }
+  return nullptr;
+}
+
 void SettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -464,31 +563,43 @@ void SettingsActivity::render(RenderLock&&) {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  // Aurora owns the whole settings layout (status bar + category pills + value rows).
+  // Aurora owns the whole settings layout: a flat, section-grouped value list
+  // plus (on the top-level page) the persistent bottom tab bar.
   if (GUI.ownsSettingsLayout()) {
-    std::vector<std::string> categories;
-    categories.reserve(categoryCount);
-    for (int i = 0; i < categoryCount; ++i) {
-      categories.emplace_back(I18N.get(categoryNames[i]));
-    }
-    std::vector<std::string> names;
-    std::vector<std::string> values;
-    names.reserve(currentSettings->size());
-    values.reserve(currentSettings->size());
-    for (const auto& setting : *currentSettings) {
-      names.emplace_back(I18N.get(setting.nameId));
-      values.emplace_back(settingValueText(setting));
+    std::vector<SettingsListItem> items;
+    items.reserve(auroraEntries.size());
+    int row = 0;
+    for (const auto& entry : auroraEntries) {
+      if (entry.isHeader) {
+        // Uppercase the section label, matching the reference design (ASCII).
+        std::string header = I18N.get(entry.header);
+        for (char& c : header) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        items.push_back(SettingsListItem{true, std::move(header), "", false, false});
+        continue;
+      }
+      SettingsListItem item;
+      item.text = I18N.get(entry.setting.nameId);
+      item.value = settingValueText(entry.setting);
+      item.selected = row == auroraSelected;
+      item.showChevron = true;
+      items.push_back(std::move(item));
+      ++row;
     }
 
     const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
-    GUI.drawSettingsScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, categories,
-                           selectedCategoryIndex, names, values, selectedSettingIndex);
+    const int barH = advancedPage ? 0 : GUI.bottomBarHeight();
+    const char* title = advancedPage ? tr(STR_ADVANCED_SETTINGS) : tr(STR_SETTINGS_TITLE);
+    GUI.drawSettingsScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight - barH}, title, items);
 
-    // Front hints (4): Back, Select/open, and Left/Right adjust the value.
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+    // Front hints: Back, Select; Left/Right switch tabs on the top-level page.
+    const char* leftHint = advancedPage ? "" : tr(STR_DIR_LEFT);
+    const char* rightHint = advancedPage ? "" : tr(STR_DIR_RIGHT);
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), leftHint, rightHint);
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     // Side hints (2): Up/Down move between rows. Self-guarded by showButtonHints.
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+
+    if (!advancedPage) HomeTabBar::draw(renderer, pageWidth, pageHeight, HomeTabBar::Settings);
 
     renderer.displayBuffer();
     return;

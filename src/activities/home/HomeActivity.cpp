@@ -17,6 +17,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "activities/util/HomeTabBar.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -119,31 +120,9 @@ void HomeActivity::onEnter() {
   const auto base = static_cast<int>(recentBooks.size());
   selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
 
-  // Aurora two-zone state: default to the content list. If this Home was opened
-  // targeting a specific destination (initialMenuItem), focus that bottom-bar tab.
-  homeZone = HomeZone::List;
+  // Aurora: the Library tab is always the active content; Up/Down browse the
+  // book list and the bottom bar always highlights Library.
   homeListIndex = 0;
-  homeBarIndex = 0;
-  switch (initialMenuItem) {
-    case HomeMenuItem::FILE_BROWSER:
-      homeBarIndex = 0;
-      homeZone = HomeZone::Bar;
-      break;
-    case HomeMenuItem::RECENTS:
-      homeBarIndex = 1;
-      homeZone = HomeZone::Bar;
-      break;
-    case HomeMenuItem::SETTINGS_MENU:
-      homeBarIndex = 2;
-      homeZone = HomeZone::Bar;
-      break;
-    case HomeMenuItem::FILE_TRANSFER:
-      homeBarIndex = 3;
-      homeZone = HomeZone::Bar;
-      break;
-    default:
-      break;
-  }
 
   // Trigger first update
   requestUpdate();
@@ -200,39 +179,22 @@ void HomeActivity::loop() {
     const int listCount = static_cast<int>(recentBooks.size());
 
     // Home is top-level: Back is inactive here (and hidden in the hints, like Lyra).
+    // Left/Right switch bottom-bar tabs (Library is the current tab).
+    if (HomeTabBar::handleLeftRight(mappedInput, HomeTabBar::Library)) return;
 
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, [this, listCount] {
-      homeZone = HomeZone::List;
       if (listCount > 0) homeListIndex = ButtonNavigator::previousIndex(homeListIndex, listCount);
       requestUpdate();
     });
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, [this, listCount] {
-      homeZone = HomeZone::List;
       if (listCount > 0) homeListIndex = ButtonNavigator::nextIndex(homeListIndex, listCount);
       requestUpdate();
     });
-    // Left/Right move to the adjacent bottom-bar tab and open it immediately --
-    // no Confirm needed. Single press (not continuous) so one tap = one page.
-    buttonNavigator.onPress({MappedInputManager::Button::Left}, [this] {
-      homeZone = HomeZone::Bar;
-      homeBarIndex = ButtonNavigator::previousIndex(homeBarIndex, kHomeBarCount);
-      openHomeBarDestination(homeBarIndex);
-    });
-    buttonNavigator.onPress({MappedInputManager::Button::Right}, [this] {
-      homeZone = HomeZone::Bar;
-      homeBarIndex = ButtonNavigator::nextIndex(homeBarIndex, kHomeBarCount);
-      openHomeBarDestination(homeBarIndex);
-    });
 
-    // Confirm still opens: a book when the list zone is active, otherwise the
-    // current bar tab (e.g. when Home was opened targeting a specific tab).
+    // Confirm opens the selected book.
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (homeZone == HomeZone::List) {
-        if (homeListIndex >= 0 && homeListIndex < listCount) {
-          onSelectBook(recentBooks[homeListIndex].path);
-        }
-      } else {
-        openHomeBarDestination(homeBarIndex);
+      if (homeListIndex >= 0 && homeListIndex < listCount) {
+        onSelectBook(recentBooks[homeListIndex].path);
       }
     }
     return;
@@ -290,23 +252,17 @@ void HomeActivity::render(RenderLock&&) {
   // selector/loop() navigation is shared: indices [0, recentBooks.size()) open a
   // book, the rest map to the actions below in the same order.
   if (GUI.ownsHomeLayout()) {
-    // Fixed bottom-bar destinations (matches homeBarIndex dispatch in loop()).
-    const std::vector<std::string> barLabels = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_SETTINGS_TITLE),
-                                                tr(STR_FILE_TRANSFER)};
-    const std::vector<UIIcon> barIcons = {Folder, Recent, Settings, Transfer};
+    // Persistent bottom-bar tabs; Library is the active tab on Home.
+    const std::vector<std::string> barLabels = HomeTabBar::labels();
+    const std::vector<UIIcon> barIcons = HomeTabBar::icons();
 
     // Reserve space for the front button hint row only when the user shows it.
     const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
-    const int listSelected = homeZone == HomeZone::List ? homeListIndex : -1;
-    // The bottom bar always knows its remembered tab (homeBarIndex). When the list
-    // zone is active the bar is unfocused and the theme draws an outline box there;
-    // when the bar zone is active it draws a solid highlight instead.
-    const bool barFocused = homeZone == HomeZone::Bar;
 
     GUI.drawHomeScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, recentBooks, barLabels, barIcons,
-                       listSelected, homeBarIndex, barFocused);
+                       homeListIndex, HomeTabBar::Library);
 
-    // Front hints: Back hidden on home (top-level, like Lyra); Select + Left/Right move the bar.
+    // Front hints: Back hidden on home (top-level, like Lyra); Select opens, Left/Right switch tabs.
     const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     // Side hints (2): Up/Down browse the list. Self-guarded by showButtonHints.
@@ -378,25 +334,6 @@ void HomeActivity::render(RenderLock&&) {
   } else if (!recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     loadRecentCovers(metrics.homeCoverHeight);
-  }
-}
-
-void HomeActivity::openHomeBarDestination(int barIndex) {
-  switch (barIndex) {
-    case 0:
-      onFileBrowserOpen();
-      break;
-    case 1:
-      onRecentsOpen();
-      break;
-    case 2:
-      onSettingsOpen();
-      break;
-    case 3:
-      onFileTransferOpen();
-      break;
-    default:
-      break;
   }
 }
 
