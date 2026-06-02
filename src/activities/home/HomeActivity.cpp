@@ -309,10 +309,13 @@ void HomeActivity::render(RenderLock&&) {
     // Reserve space for the front button hint row only when the user shows it.
     const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
     const int listSelected = homeZone == HomeZone::List ? homeListIndex : -1;
-    const int barSelected = homeZone == HomeZone::Bar ? homeBarIndex : -1;
+    // The bottom bar always knows its remembered tab (homeBarIndex). When the list
+    // zone is active the bar is unfocused and the theme draws an outline box there;
+    // when the bar zone is active it draws a solid highlight instead.
+    const bool barFocused = homeZone == HomeZone::Bar;
 
     GUI.drawHomeScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, recentBooks, barLabels, barIcons,
-                       listSelected, barSelected);
+                       listSelected, homeBarIndex, barFocused);
 
     // Front hints: Back hidden on home (top-level, like Lyra); Select + Left/Right move the bar.
     const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
