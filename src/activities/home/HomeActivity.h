@@ -67,6 +67,7 @@ class HomeActivity final : public Activity {
     return HomeMenuItem::NONE;
   }
   void onSelectBook(const std::string& path);
+  void openHomeBarDestination(int barIndex);  // Open the bottom-bar tab at barIndex.
   void onFileBrowserOpen();
   void onRecentsOpen();
   void onSettingsOpen();

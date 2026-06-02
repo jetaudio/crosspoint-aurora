@@ -211,39 +211,28 @@ void HomeActivity::loop() {
       if (listCount > 0) homeListIndex = ButtonNavigator::nextIndex(homeListIndex, listCount);
       requestUpdate();
     });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] {
+    // Left/Right move to the adjacent bottom-bar tab and open it immediately --
+    // no Confirm needed. Single press (not continuous) so one tap = one page.
+    buttonNavigator.onPress({MappedInputManager::Button::Left}, [this] {
       homeZone = HomeZone::Bar;
       homeBarIndex = ButtonNavigator::previousIndex(homeBarIndex, kHomeBarCount);
-      requestUpdate();
+      openHomeBarDestination(homeBarIndex);
     });
-    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] {
+    buttonNavigator.onPress({MappedInputManager::Button::Right}, [this] {
       homeZone = HomeZone::Bar;
       homeBarIndex = ButtonNavigator::nextIndex(homeBarIndex, kHomeBarCount);
-      requestUpdate();
+      openHomeBarDestination(homeBarIndex);
     });
 
+    // Confirm still opens: a book when the list zone is active, otherwise the
+    // current bar tab (e.g. when Home was opened targeting a specific tab).
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (homeZone == HomeZone::List) {
         if (homeListIndex >= 0 && homeListIndex < listCount) {
           onSelectBook(recentBooks[homeListIndex].path);
         }
       } else {
-        switch (homeBarIndex) {
-          case 0:
-            onFileBrowserOpen();
-            break;
-          case 1:
-            onRecentsOpen();
-            break;
-          case 2:
-            onSettingsOpen();
-            break;
-          case 3:
-            onFileTransferOpen();
-            break;
-          default:
-            break;
-        }
+        openHomeBarDestination(homeBarIndex);
       }
     }
     return;
@@ -389,6 +378,25 @@ void HomeActivity::render(RenderLock&&) {
   } else if (!recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     loadRecentCovers(metrics.homeCoverHeight);
+  }
+}
+
+void HomeActivity::openHomeBarDestination(int barIndex) {
+  switch (barIndex) {
+    case 0:
+      onFileBrowserOpen();
+      break;
+    case 1:
+      onRecentsOpen();
+      break;
+    case 2:
+      onSettingsOpen();
+      break;
+    case 3:
+      onFileTransferOpen();
+      break;
+    default:
+      break;
   }
 }
 
