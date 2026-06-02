@@ -518,6 +518,8 @@ void SettingsActivity::buildAuroraEntries() {
                {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ, StrId::STR_SHOW_BUTTON_HINTS});
     addSection(StrId::STR_CAT_DEVICE,
                {StrId::STR_WIFI_NETWORKS, StrId::STR_TIME_TO_SLEEP, StrId::STR_LANGUAGE, StrId::STR_CHECK_UPDATES});
+    // Spacer header (no label) so the entry below sits in its own card.
+    auroraEntries.push_back(AuroraEntry{true, StrId::STR_NONE_OPT, {}});
     // Everything else lives behind this entry.
     auroraEntries.push_back(AuroraEntry{
         false, StrId::STR_NONE_OPT, SettingInfo::Action(StrId::STR_ADVANCED_SETTINGS, SettingAction::OpenAdvanced)});
@@ -572,8 +574,9 @@ void SettingsActivity::render(RenderLock&&) {
     int row = 0;
     for (const auto& entry : auroraEntries) {
       if (entry.isHeader) {
-        // Uppercase the section label, matching the reference design (ASCII).
-        std::string header = I18N.get(entry.header);
+        // STR_NONE_OPT marks a spacer (blank label). Otherwise uppercase the
+        // section label, matching the reference design (ASCII).
+        std::string header = entry.header == StrId::STR_NONE_OPT ? std::string() : std::string(I18N.get(entry.header));
         for (char& c : header) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         items.push_back(SettingsListItem{true, std::move(header), "", false, false});
         continue;
