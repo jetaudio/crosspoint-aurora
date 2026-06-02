@@ -33,8 +33,6 @@ constexpr int kTextGap = 16;       // Gap between thumbnail and title block
 constexpr int kIconSize = 32;      // Placeholder cover glyph / bottom-bar icon size
 constexpr int kSectionGap = 28;    // Gap above the "Library" header
 constexpr int kBottomBarHeight = 70;
-constexpr int kPillHeight = 30;        // Settings category pill height
-constexpr int kPillGap = 8;            // Gap between category pills
 constexpr int kSettingRowHeight = 40;  // Settings value row height
 constexpr int kSettingValueCol = 150;  // Reserved width for the right value column
 constexpr int kSettingArrow = 7;       // Triangle arrow size for adjustable values
@@ -71,7 +69,7 @@ const uint8_t* barIconBitmap(UIIcon icon) {
 
 void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                                  const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons,
-                                 int listSelected, int barSelected, bool barFocused) const {
+                                 int listSelected, int activeTab) const {
   const auto& metrics = AuroraMetrics::values;
   const int W = content.width;
   const int P = metrics.contentSidePadding;
@@ -180,47 +178,50 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
       [&recentBooks, featuredOffset](int i) { return recentBooks[featuredOffset + i].title; }, nullptr,
       [](int) -> UIIcon { return Book; });
 
-  // --- Bottom navigation bar: 4 icon + label tabs ---
-  const int barCount = static_cast<int>(std::min(barLabels.size(), barIcons.size()));
-  if (barCount > 0) {
-    renderer.drawLine(0, barTop, W, barTop);
-    const int slotW = W / barCount;
-    for (int i = 0; i < barCount; ++i) {
-      const int slotX = i * slotW;
-      const int centerX = slotX + slotW / 2;
+  // --- Persistent bottom navigation bar (Library tab active on Home) ---
+  drawBottomBar(renderer, Rect{0, barTop, W, kBottomBarHeight}, barLabels, barIcons, activeTab);
+}
 
-      if (i == barSelected) {
-        if (barFocused) {
-          // Bar is the active zone: solid highlight on the selected tab.
-          renderer.fillRoundedRect(slotX + 6, barTop + 5, slotW - 12, kBottomBarHeight - 10, 8, Color::LightGray);
-        } else {
-          // Bar is unfocused (browsing the list): outline box marking the tab
-          // that focus will return to when the user moves Left/Right.
-          renderer.drawRoundedRect(slotX + 6, barTop + 5, slotW - 12, kBottomBarHeight - 10, 1, 8, true);
-        }
-      }
+int AuroraTheme::bottomBarHeight() const { return kBottomBarHeight; }
 
-      const uint8_t* iconBitmap = barIconBitmap(barIcons[i]);
-      if (iconBitmap != nullptr) {
-        renderer.drawIcon(iconBitmap, centerX - kIconSize / 2, barTop + 10, kIconSize, kIconSize);
-      }
+void AuroraTheme::drawBottomBar(GfxRenderer& renderer, Rect barRect, const std::vector<std::string>& labels,
+                                const std::vector<UIIcon>& icons, int activeTab) const {
+  const int barCount = static_cast<int>(std::min(labels.size(), icons.size()));
+  if (barCount <= 0) return;
 
-      const auto label = renderer.truncatedText(kBarLabelFontId, barLabels[i].c_str(), slotW - 6);
-      const int labelWidth = renderer.getTextWidth(kBarLabelFontId, label.c_str());
-      renderer.drawText(kBarLabelFontId, centerX - labelWidth / 2, barTop + 10 + kIconSize + 2, label.c_str());
+  const int barTop = barRect.y;
+  renderer.drawLine(barRect.x, barTop, barRect.x + barRect.width, barTop);
+  const int slotW = barRect.width / barCount;
+  for (int i = 0; i < barCount; ++i) {
+    const int slotX = barRect.x + i * slotW;
+    const int centerX = slotX + slotW / 2;
+
+    // Active tab: light-gray rounded pill (the shared Aurora selection style).
+    if (i == activeTab) {
+      renderer.fillRoundedRect(slotX + 6, barTop + 5, slotW - 12, barRect.height - 10, 8, Color::LightGray);
     }
+
+    const uint8_t* iconBitmap = barIconBitmap(icons[i]);
+    if (iconBitmap != nullptr) {
+      renderer.drawIcon(iconBitmap, centerX - kIconSize / 2, barTop + 10, kIconSize, kIconSize);
+    }
+
+    const auto style = (i == activeTab) ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+    const auto label = renderer.truncatedText(kBarLabelFontId, labels[i].c_str(), slotW - 6, style);
+    const int labelWidth = renderer.getTextWidth(kBarLabelFontId, label.c_str(), style);
+    renderer.drawText(kBarLabelFontId, centerX - labelWidth / 2, barTop + 10 + kIconSize + 2, label.c_str(), true,
+                      style);
   }
 }
 
-void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const std::vector<std::string>& categories,
-                                     int activeCategory, const std::vector<std::string>& names,
-                                     const std::vector<std::string>& values, int selectedIndex) const {
+void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const char* title,
+                                     const std::vector<SettingsListItem>& items) const {
   const auto& metrics = AuroraMetrics::values;
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
   // --- Status bar: title (left), clock (X3 only), battery (right), divider ---
-  renderer.drawText(kCaptionFontId, P, kStatusY, tr(STR_SETTINGS_TITLE), true, EpdFontFamily::BOLD);
+  renderer.drawText(kCaptionFontId, P, kStatusY, title, true, EpdFontFamily::BOLD);
   if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
@@ -234,88 +235,98 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
   const int dividerY = kStatusY + kDividerGap;
   renderer.drawLine(P, dividerY, W - P, dividerY);
 
-  // --- Category pills (Left/Right cycles when this row is focused) ---
-  const int catCount = static_cast<int>(categories.size());
-  const int pillsTop = dividerY + 12;
-  const bool categoryFocused = selectedIndex == 0;
-  if (catCount > 0) {
-    const int pillW = (W - 2 * P - kPillGap * (catCount - 1)) / catCount;
-    for (int i = 0; i < catCount; ++i) {
-      const int x = P + i * (pillW + kPillGap);
-      const bool isActive = i == activeCategory;
-      const auto style = isActive ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
-      if (isActive) {
-        renderer.fillRoundedRect(x, pillsTop, pillW, kPillHeight, kPillHeight / 2, Color::Black);
-        if (categoryFocused) {
-          renderer.drawRoundedRect(x - 3, pillsTop - 3, pillW + 6, kPillHeight + 6, 1, kPillHeight / 2 + 3, true);
-        }
-      } else {
-        renderer.drawRoundedRect(x, pillsTop, pillW, kPillHeight, 1, kPillHeight / 2, true);
-      }
-      const auto label = renderer.truncatedText(kHeaderFontId, categories[i].c_str(), pillW - 8, style);
-      const int lw = renderer.getTextWidth(kHeaderFontId, label.c_str(), style);
-      const int ly = pillsTop + (kPillHeight - renderer.getLineHeight(kHeaderFontId)) / 2;
-      renderer.drawText(kHeaderFontId, x + (pillW - lw) / 2, ly, label.c_str(), !isActive, style);
-    }
-  }
-
-  // --- Setting rows ---
-  const int listTop = pillsTop + kPillHeight + 16;
-  const int listHeight = std::max(0, content.height - listTop);
-  const int rowCount = static_cast<int>(std::min(names.size(), values.size()));
-  const int selRow = selectedIndex - 1;  // -1 when the category row is focused
-  // Reserve a right margin for the side button hints (drawn by the activity).
+  // --- Flat, section-grouped value list (no category pills) ---
+  const int listTop = dividerY + 10;
+  const int listBottom = content.y + content.height;
+  const int listHeight = std::max(0, listBottom - listTop);
+  const int rowH = kSettingRowHeight;
+  const int headerH = 28;
   const int rightInset = SETTINGS.showButtonHints ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int rowLeft = P - 4;
   const int rowRight = W - (P - 4) - rightInset;
   const int valueRightX = rowRight - 10;
-  const int nameMaxWidth = std::max(40, (rowRight - (P + 6)) - kSettingValueCol);
 
-  const int pageItems = std::max(1, listHeight / kSettingRowHeight);
-  const int pageStart = (selRow >= 0 ? selRow : 0) / pageItems * pageItems;
+  const int n = static_cast<int>(items.size());
+  auto itemH = [&](int i) { return items[i].isHeader ? headerH : rowH; };
 
-  for (int i = pageStart; i < rowCount && i < pageStart + pageItems; ++i) {
-    const int y = listTop + (i - pageStart) * kSettingRowHeight;
-    const int cy = y + kSettingRowHeight / 2;
-    const bool selected = i == selRow;
-    const auto style = selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+  // Selected row drives which page is visible.
+  int selItem = 0;
+  for (int i = 0; i < n; ++i) {
+    if (items[i].selected) {
+      selItem = i;
+      break;
+    }
+  }
 
-    if (selected) {
-      renderer.fillRoundedRect(rowLeft, y + 3, rowRight - rowLeft, kSettingRowHeight - 6, 12, Color::LightGray);
+  // Partition items into pages that fit listHeight; render the page holding the
+  // selection. (Section headers count toward page height, like rows.)
+  std::vector<int> pageStarts = {0};
+  {
+    int acc = 0;
+    for (int i = 0; i < n; ++i) {
+      const int h = itemH(i);
+      if (acc + h > listHeight && i > pageStarts.back()) {
+        pageStarts.push_back(i);
+        acc = 0;
+      }
+      acc += h;
+    }
+  }
+  int pageStart = 0;
+  int pageEnd = n;
+  for (int p = 0; p < static_cast<int>(pageStarts.size()); ++p) {
+    const int start = pageStarts[p];
+    const int end = (p + 1 < static_cast<int>(pageStarts.size())) ? pageStarts[p + 1] : n;
+    if (selItem >= start && selItem < end) {
+      pageStart = start;
+      pageEnd = end;
+      break;
+    }
+  }
+
+  int y = listTop;
+  for (int i = pageStart; i < pageEnd; ++i) {
+    const SettingsListItem& it = items[i];
+    const int h = itemH(i);
+    if (y + h > listBottom) break;
+
+    if (it.isHeader) {
+      const int ty = y + headerH - renderer.getLineHeight(kCaptionFontId) - 2;
+      renderer.drawText(kCaptionFontId, P + 2, ty, it.text.c_str(), true, EpdFontFamily::BOLD);
+      y += h;
+      continue;
     }
 
-    const auto name = renderer.truncatedText(kSettingNameFontId, names[i].c_str(), nameMaxWidth, style);
-    renderer.drawText(kSettingNameFontId, P + 6,
-                      y + (kSettingRowHeight - renderer.getLineHeight(kSettingNameFontId)) / 2, name.c_str(), true,
-                      style);
+    const int cy = y + rowH / 2;
+    const auto style = it.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+    if (it.selected) {
+      renderer.fillRoundedRect(rowLeft, y + 3, rowRight - rowLeft, rowH - 6, 12, Color::LightGray);
+    }
 
-    const std::string& val = values[i];
-    if (!val.empty()) {
-      const auto vTrunc = renderer.truncatedText(kBodyFontId, val.c_str(), kSettingValueCol - 30, style);
-      const int vw = renderer.getTextWidth(kBodyFontId, vTrunc.c_str(), style);
-      const int vy = y + (kSettingRowHeight - renderer.getLineHeight(kBodyFontId)) / 2;
-      if (selected) {
-        // ▸ to the right of the value, ◂ to the left — signals Left/Right adjusts it.
-        const int rTip = valueRightX;
-        int xr[3] = {rTip, rTip - kSettingArrow, rTip - kSettingArrow};
-        int yr[3] = {cy, cy - 5, cy + 5};
-        renderer.fillPolygon(xr, yr, 3, true);
-        const int vx = (rTip - kSettingArrow - 8) - vw;
-        renderer.drawText(kBodyFontId, vx, vy, vTrunc.c_str(), true, style);
-        const int lTip = vx - 8 - kSettingArrow;
-        int xl[3] = {lTip, lTip + kSettingArrow, lTip + kSettingArrow};
-        int yl[3] = {cy, cy - 5, cy + 5};
-        renderer.fillPolygon(xl, yl, 3, true);
-      } else {
-        renderer.drawText(kBodyFontId, valueRightX - vw, vy, vTrunc.c_str());
-      }
-    } else if (selected) {
-      // Action row (no value): a single ▸ chevron indicates "open with Select".
+    // Right-aligned ▸ chevron (signals "Select opens/changes this row").
+    int contentRightX = valueRightX;
+    if (it.showChevron) {
       const int rTip = valueRightX;
       int xr[3] = {rTip, rTip - kSettingArrow, rTip - kSettingArrow};
       int yr[3] = {cy, cy - 5, cy + 5};
       renderer.fillPolygon(xr, yr, 3, true);
+      contentRightX = rTip - kSettingArrow - 8;
     }
+
+    // Value (right of the name, left of the chevron).
+    if (!it.value.empty()) {
+      const auto vTrunc = renderer.truncatedText(kBodyFontId, it.value.c_str(), kSettingValueCol, style);
+      const int vw = renderer.getTextWidth(kBodyFontId, vTrunc.c_str(), style);
+      const int vy = y + (rowH - renderer.getLineHeight(kBodyFontId)) / 2;
+      renderer.drawText(kBodyFontId, contentRightX - vw, vy, vTrunc.c_str(), true, style);
+      contentRightX -= vw + 10;
+    }
+
+    const int nameMaxWidth = std::max(40, contentRightX - (P + 6));
+    const auto name = renderer.truncatedText(kSettingNameFontId, it.text.c_str(), nameMaxWidth, style);
+    renderer.drawText(kSettingNameFontId, P + 6, y + (rowH - renderer.getLineHeight(kSettingNameFontId)) / 2,
+                      name.c_str(), true, style);
+    y += h;
   }
 }
 

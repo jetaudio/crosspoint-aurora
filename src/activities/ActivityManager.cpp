@@ -225,6 +225,28 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
   }
   replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem));
 }
+void ActivityManager::goToHomeTab(int tab) {
+  // Mirrors HomeTabBar::Tab (Library/Browse/Settings/Transfer). The Library tab
+  // is the Home screen itself; all four use replaceActivity, so switching tabs
+  // never grows the back stack.
+  switch (tab) {
+    case 0:
+      goHome();
+      break;
+    case 1:
+      goToFileBrowser();
+      break;
+    case 2:
+      goToSettings();
+      break;
+    case 3:
+      goToFileTransfer();
+      break;
+    default:
+      break;
+  }
+}
+
 void ActivityManager::goToCrashReport() { replaceActivity(std::make_unique<CrashActivity>(renderer, mappedInput)); }
 
 void ActivityManager::pushActivity(std::unique_ptr<Activity>&& activity) {

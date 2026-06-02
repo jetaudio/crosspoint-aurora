@@ -30,12 +30,15 @@ class AuroraTheme : public BaseTheme {
   bool ownsHomeLayout() const override { return true; }
   void drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                       const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons, int listSelected,
-                      int barSelected, bool barFocused) const override;
+                      int activeTab) const override;
+
+  int bottomBarHeight() const override;
+  void drawBottomBar(GfxRenderer& renderer, Rect barRect, const std::vector<std::string>& labels,
+                     const std::vector<UIIcon>& icons, int activeTab) const override;
 
   bool ownsSettingsLayout() const override { return true; }
-  void drawSettingsScreen(GfxRenderer& renderer, Rect content, const std::vector<std::string>& categories,
-                          int activeCategory, const std::vector<std::string>& names,
-                          const std::vector<std::string>& values, int selectedIndex) const override;
+  void drawSettingsScreen(GfxRenderer& renderer, Rect content, const char* title,
+                          const std::vector<SettingsListItem>& items) const override;
 
   // Aurora restyle of the shared list/header primitives so every screen that uses
   // them (reader menu, TOC, file browser, recent books, ...) gets the Aurora look:

@@ -23,6 +23,7 @@ enum class SettingAction {
   SdFirmwareUpdate,
   Language,
   DownloadFonts,
+  OpenAdvanced,  // Aurora: open the Advanced Settings sub-page
 };
 
 struct SettingInfo {
@@ -156,6 +157,17 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> systemSettings;
   const std::vector<SettingInfo>* currentSettings = nullptr;
 
+  // Aurora flat-list model: section headers interleaved with value rows.
+  struct AuroraEntry {
+    bool isHeader = false;
+    StrId header = StrId::STR_NONE_OPT;  // section label when isHeader
+    SettingInfo setting;                 // value/action row when !isHeader
+  };
+  const bool advancedPage;  // true = the "Advanced Settings" sub-page
+  std::vector<AuroraEntry> auroraEntries;
+  int auroraSelectableCount = 0;  // number of non-header rows
+  int auroraSelected = 0;         // selected row (index among non-header rows)
+
   bool preserveQuickResumeTimeoutOn = false;
   bool quickResumeTimeoutAutoEnabled = false;
 
@@ -164,6 +176,7 @@ class SettingsActivity final : public Activity {
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
+  void activateSetting(const SettingInfo& setting);  // toggle/cycle/open a row
   // Aurora settings: Left/Right adjust the selected setting's value (dir -1/+1);
   // changeCategory cycles the category; settingValueText formats a row's value.
   void adjustCurrentSetting(int direction);
@@ -173,9 +186,14 @@ class SettingsActivity final : public Activity {
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
 
+  // Aurora sectioned-list helpers.
+  static bool isTopLevelSetting(StrId nameId);
+  void buildAuroraEntries();
+  const SettingInfo* auroraSelectedSetting() const;
+
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("Settings", renderer, mappedInput) {}
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool advanced = false)
+      : Activity("Settings", renderer, mappedInput), advancedPage(advanced) {}
   void onEnter() override;
   void onExit() override;
   void loop() override;
