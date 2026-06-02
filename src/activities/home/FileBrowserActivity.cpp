@@ -7,6 +7,7 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <cctype>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -389,6 +390,20 @@ void FileBrowserActivity::render(RenderLock&&) {
   if (files.empty()) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
+  } else if (tabMode) {
+    // Aurora "Browse" tab: two-line rows (name + type subtitle), like the design.
+    GUI.drawList(
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
+        [this](int index) { return getFileName(files[index]); },
+        [this](int index) -> std::string {
+          const std::string& f = files[index];
+          if (!f.empty() && f.back() == '/') return I18N.get(StrId::STR_FOLDER);
+          std::string ext = getFileExtension(f);  // ".epub" or ""
+          if (!ext.empty() && ext.front() == '.') ext.erase(0, 1);
+          for (char& c : ext) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+          return ext;
+        },
+        [this](int index) { return UITheme::getFileIcon(files[index]); });
   } else {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,

@@ -510,9 +510,10 @@ void SettingsActivity::buildAuroraEntries() {
   };
 
   if (!advancedPage) {
-    // Curated, important settings grouped into Reading / Display / Device.
-    addSection(StrId::STR_CAT_READER, {StrId::STR_FONT_FAMILY, StrId::STR_MANAGE_FONTS, StrId::STR_FONT_SIZE,
-                                       StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
+    // Curated, important settings grouped into Reading / Display / Device
+    // (section names match the reference design).
+    addSection(StrId::STR_SEC_READING, {StrId::STR_FONT_FAMILY, StrId::STR_MANAGE_FONTS, StrId::STR_FONT_SIZE,
+                                        StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
     addSection(StrId::STR_CAT_DISPLAY,
                {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ, StrId::STR_SHOW_BUTTON_HINTS});
     addSection(StrId::STR_CAT_DEVICE,
@@ -533,8 +534,8 @@ void SettingsActivity::buildAuroraEntries() {
         auroraEntries.push_back(AuroraEntry{false, StrId::STR_NONE_OPT, s});
       }
     };
+    addRemaining(StrId::STR_SEC_READING, readerSettings);
     addRemaining(StrId::STR_CAT_DISPLAY, displaySettings);
-    addRemaining(StrId::STR_CAT_READER, readerSettings);
     addRemaining(StrId::STR_CAT_CONTROLS, controlsSettings);
     addRemaining(StrId::STR_CAT_SYSTEM, systemSettings);
   }
