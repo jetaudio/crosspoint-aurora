@@ -30,7 +30,7 @@ class AuroraTheme : public BaseTheme {
   bool ownsHomeLayout() const override { return true; }
   void drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                       const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons, int listSelected,
-                      int barSelected) const override;
+                      int barSelected, bool barFocused) const override;
 
   bool ownsSettingsLayout() const override { return true; }
   void drawSettingsScreen(GfxRenderer& renderer, Rect content, const std::vector<std::string>& categories,

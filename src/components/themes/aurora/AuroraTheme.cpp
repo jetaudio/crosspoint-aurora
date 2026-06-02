@@ -71,7 +71,7 @@ const uint8_t* barIconBitmap(UIIcon icon) {
 
 void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                                  const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons,
-                                 int listSelected, int barSelected) const {
+                                 int listSelected, int barSelected, bool barFocused) const {
   const auto& metrics = AuroraMetrics::values;
   const int W = content.width;
   const int P = metrics.contentSidePadding;
@@ -190,7 +190,14 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
       const int centerX = slotX + slotW / 2;
 
       if (i == barSelected) {
-        renderer.fillRoundedRect(slotX + 6, barTop + 5, slotW - 12, kBottomBarHeight - 10, 8, Color::LightGray);
+        if (barFocused) {
+          // Bar is the active zone: solid highlight on the selected tab.
+          renderer.fillRoundedRect(slotX + 6, barTop + 5, slotW - 12, kBottomBarHeight - 10, 8, Color::LightGray);
+        } else {
+          // Bar is unfocused (browsing the list): outline box marking the tab
+          // that focus will return to when the user moves Left/Right.
+          renderer.drawRoundedRect(slotX + 6, barTop + 5, slotW - 12, kBottomBarHeight - 10, 1, 8, true);
+        }
       }
 
       const uint8_t* iconBitmap = barIconBitmap(barIcons[i]);
