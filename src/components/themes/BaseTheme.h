@@ -34,6 +34,21 @@ struct SettingsListItem {
   bool showChevron = false;  // draw a ▸ affordance (actions / submenu entries)
 };
 
+// Data the reader passes to drawReaderToolbar() — the Aurora overlay shown on
+// Select while reading. Chapter page/percent are what the reader already tracks
+// (chapter-relative page X/Y + whole-book percent); there is no book-level page
+// numbering. focusedTool is 0=Contents, 1=Text, 2=More.
+struct ReaderToolbarInfo {
+  const char* bookTitle = nullptr;
+  const char* chapterTitle = nullptr;
+  int chapterPage = 0;       // 1-based page within the current chapter
+  int chapterPageCount = 0;  // total pages in the current chapter
+  int bookPercent = 0;       // 0..100 progress through the whole book
+  float progress = 0.0f;     // 0..1 position for the scrub knob
+  int focusedTool = 0;       // 0=Contents, 1=Text, 2=More
+  bool focusReadingOn = false;
+};
+
 struct ThemeMetrics {
   int batteryWidth;
   int batteryHeight;
@@ -244,6 +259,15 @@ class BaseTheme {
   // headers and value rows in display order.
   virtual void drawSettingsScreen(GfxRenderer&, Rect, const char* /*title*/,
                                   const std::vector<SettingsListItem>& /*items*/) const {}
+
+  // Opt-in hook for themes that own the reader chrome (Aurora): a clean reading
+  // page (no persistent bottom status bar) plus the two-bar toolbar overlay drawn
+  // by drawReaderToolbar(). Default themes return false and keep the classic
+  // status bar + full-screen list menu.
+  virtual bool ownsReaderChrome() const { return false; }
+  // Draws the reader toolbar overlay (top bar + bottom scrub/meta/tool rows) on
+  // top of the already-rendered page. `screen` is the full screen rect.
+  virtual void drawReaderToolbar(GfxRenderer&, Rect /*screen*/, const ReaderToolbarInfo& /*info*/) const {}
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
