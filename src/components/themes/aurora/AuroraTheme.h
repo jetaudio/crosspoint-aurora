@@ -42,6 +42,9 @@ class AuroraTheme : public BaseTheme {
 
   bool ownsReaderChrome() const override { return true; }
   void drawReaderToolbar(GfxRenderer& renderer, Rect screen, const ReaderToolbarInfo& info) const override;
+  void drawReaderPanel(GfxRenderer& renderer, Rect screen, const char* title, int itemCount, int selectedIndex,
+                       const std::function<std::string(int)>& rowText,
+                       const std::function<std::string(int)>& rowValue = nullptr) const override;
 
   // Aurora restyle of the shared list/header primitives so every screen that uses
   // them (reader menu, TOC, file browser, recent books, ...) gets the Aurora look:

@@ -565,3 +565,30 @@ void AuroraTheme::drawReaderToolbar(GfxRenderer& renderer, Rect screen, const Re
     renderer.drawText(kBarLabelFontId, cx - lw / 2, ty + 46, labels[i], true, EpdFontFamily::BOLD);
   }
 }
+
+void AuroraTheme::drawReaderPanel(GfxRenderer& renderer, Rect screen, const char* title, int itemCount,
+                                  int selectedIndex, const std::function<std::string(int)>& rowText,
+                                  const std::function<std::string(int)>& rowValue) const {
+  const int X = screen.x;
+  const int Y = screen.y;
+  const int W = screen.width;
+  const int H = screen.height;
+  const int P = AuroraMetrics::values.contentSidePadding;
+
+  // Bottom sheet covering the lower part of the screen; the page stays visible above.
+  const int panelTop = Y + (H * 38) / 100;
+  renderer.fillRect(X, panelTop, W, (Y + H) - panelTop, false);  // clear page text behind the sheet
+  renderer.drawLine(X, panelTop, X + W, panelTop);
+  renderer.drawLine(X, panelTop + 1, X + W, panelTop + 1);  // 2px top edge
+
+  const int titleY = panelTop + 14;
+  renderer.drawText(kTitleFontId, X + P, titleY, title, true, EpdFontFamily::BOLD);
+  const int dividerY = titleY + renderer.getLineHeight(kTitleFontId) + 8;
+  renderer.drawLine(X + P, dividerY, X + W - P, dividerY);
+
+  const int contentTop = dividerY + 10;
+  const int hintReserve = 44;  // leave room for the button hint row at the bottom
+  const int contentH = (Y + H) - contentTop - hintReserve;
+  drawList(renderer, Rect{X, contentTop, W, contentH}, itemCount, selectedIndex, rowText, nullptr, nullptr, rowValue,
+           true);
+}

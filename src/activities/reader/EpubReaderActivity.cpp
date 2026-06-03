@@ -25,7 +25,6 @@
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
-#include "EpubReaderTextActivity.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
@@ -258,9 +257,9 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
-  // Aurora reader toolbar overlay: while open it owns all input.
-  if (GUI.ownsReaderChrome() && toolbarVisible) {
-    handleToolbarInput();
+  // Aurora reader overlays own all input while shown.
+  if (GUI.ownsReaderChrome() && overlay != Overlay::None) {
+    handleOverlayInput();
     return;
   }
 
@@ -271,14 +270,9 @@ void EpubReaderActivity::loop() {
     if (ignoreNextConfirmRelease) {
       ignoreNextConfirmRelease = false;
     } else if (GUI.ownsReaderChrome()) {
-      if (section) {
-        toolbarVisible = true;
-        focusedTool = 0;
-        renderToolbarOverlay();
-        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-      }
+      if (section) openOverlay(Overlay::Toolbar);
     } else {
-      openMoreMenu();
+      openClassicReaderMenu();
     }
   }
 
@@ -927,9 +921,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     GUI.drawPopup(renderer, tr(STR_BOOKMARK_ADDED));
   }
 
-  // Aurora: overlay the toolbar on top of the freshly rendered page.
-  if (toolbarVisible && GUI.ownsReaderChrome()) {
-    renderToolbarOverlay();
+  // Aurora: overlay the toolbar / panel on top of the freshly rendered page.
+  if (overlay != Overlay::None && GUI.ownsReaderChrome()) {
+    renderOverlay();
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   }
 }
@@ -1170,87 +1164,331 @@ std::string EpubReaderActivity::currentChapterTitle() const {
   return tr(STR_UNNAMED);
 }
 
-void EpubReaderActivity::renderToolbarOverlay() const {
-  if (!epub || !section) return;
+namespace {
+constexpr int kTextRowCount = 5;
+}  // namespace
 
-  const std::string bookTitle = utf8ComposeNfc(epub->getTitle());
-  const std::string chapterTitle = currentChapterTitle();
-  const float chapterProgress =
-      section->pageCount > 0 ? static_cast<float>(section->currentPage + 1) / static_cast<float>(section->pageCount)
-                             : 0.0f;
-  const float bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress);
-
-  ReaderToolbarInfo info;
-  info.bookTitle = bookTitle.c_str();
-  info.chapterTitle = chapterTitle.c_str();
-  info.chapterPage = section->currentPage + 1;
-  info.chapterPageCount = section->pageCount;
-  info.bookPercent = clampPercent(static_cast<int>(bookProgress * 100.0f + 0.5f));
-  info.progress = bookProgress;
-  info.focusedTool = focusedTool;
-  info.focusReadingOn = SETTINGS.focusReadingEnabled != 0;
-
-  const Rect screen{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
-  GUI.drawReaderToolbar(renderer, screen, info);
+void EpubReaderActivity::openOverlay(Overlay target) {
+  overlay = target;
+  switch (target) {
+    case Overlay::Toolbar:
+      focusedTool = 0;
+      break;
+    case Overlay::Contents:
+      panelIndex = std::max(0, epub->getTocIndexForSpineIndex(currentSpineIndex));
+      break;
+    case Overlay::Text:
+      panelIndex = 0;
+      break;
+    case Overlay::More:
+      panelIndex = 0;
+      buildMoreActions();
+      break;
+    default:
+      break;
+  }
+  requestUpdate();
 }
 
-void EpubReaderActivity::handleToolbarInput() {
+void EpubReaderActivity::renderOverlay() {
+  if (!epub || !section) return;
+  const Rect screen{0, 0, renderer.getScreenWidth(), renderer.getScreenHeight()};
+
+  if (overlay == Overlay::Toolbar) {
+    const std::string bookTitle = utf8ComposeNfc(epub->getTitle());
+    const std::string chapterTitle = currentChapterTitle();
+    const float chapterProgress =
+        section->pageCount > 0 ? static_cast<float>(section->currentPage + 1) / static_cast<float>(section->pageCount)
+                               : 0.0f;
+    const float bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress);
+    ReaderToolbarInfo info;
+    info.bookTitle = bookTitle.c_str();
+    info.chapterTitle = chapterTitle.c_str();
+    info.chapterPage = section->currentPage + 1;
+    info.chapterPageCount = section->pageCount;
+    info.bookPercent = clampPercent(static_cast<int>(bookProgress * 100.0f + 0.5f));
+    info.progress = bookProgress;
+    info.focusedTool = focusedTool;
+    info.focusReadingOn = SETTINGS.focusReadingEnabled != 0;
+    GUI.drawReaderToolbar(renderer, screen, info);
+    return;
+  }
+
+  // Panels (Contents / Text / More): a bottom sheet over the page + button hints.
+  if (overlay == Overlay::Contents) {
+    GUI.drawReaderPanel(renderer, screen, tr(STR_TOOL_CONTENTS), epub->getTocItemsCount(), panelIndex, [this](int i) {
+      const auto item = epub->getTocItem(i);
+      const int depth = item.level > 1 ? (item.level - 1) * 2 : 0;
+      return std::string(depth, ' ') + item.title;
+    });
+  } else if (overlay == Overlay::Text) {
+    GUI.drawReaderPanel(
+        renderer, screen, tr(STR_TOOL_TEXT), kTextRowCount, panelIndex, [this](int i) { return textRowName(i); },
+        [this](int i) { return textRowValue(i); });
+  } else if (overlay == Overlay::More) {
+    GUI.drawReaderPanel(
+        renderer, screen, tr(STR_TOOL_MORE), static_cast<int>(moreActions.size()), panelIndex,
+        [this](int i) { return moreRowName(i); }, [this](int i) { return moreRowValue(i); });
+  }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+void EpubReaderActivity::handleOverlayInput() {
+  const auto fastRedraw = [this] {
+    renderOverlay();
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  };
+
+  // --- Toolbar ---
+  if (overlay == Overlay::Toolbar) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      overlay = Overlay::None;
+      requestUpdate();  // redraw the clean page
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      focusedTool = (focusedTool + 2) % 3;
+      fastRedraw();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      focusedTool = (focusedTool + 1) % 3;
+      fastRedraw();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      openOverlay(focusedTool == 0 ? Overlay::Contents : (focusedTool == 1 ? Overlay::Text : Overlay::More));
+      return;
+    }
+    const bool prev = mappedInput.wasReleased(MappedInputManager::Button::Up);
+    const bool next = mappedInput.wasReleased(MappedInputManager::Button::Down);
+    if (prev || next) {
+      const int spineCount = epub->getSpineItemsCount();
+      int target = currentSpineIndex + (next ? 1 : -1);
+      if (target < 0) target = 0;
+      if (target > spineCount - 1) target = spineCount - 1;
+      if (target != currentSpineIndex) {
+        RenderLock lock(*this);
+        nextPageNumber = 0;
+        currentSpineIndex = target;
+        section.reset();
+      }
+      requestUpdate();  // re-render page + re-overlay toolbar
+    }
+    return;
+  }
+
+  // --- Panels: shared Up/Down navigation and Back ---
+  const int count = overlay == Overlay::Contents ? epub->getTocItemsCount()
+                    : overlay == Overlay::Text   ? kTextRowCount
+                                                 : static_cast<int>(moreActions.size());
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    toolbarVisible = false;
-    requestUpdate();  // redraw the clean page, erasing the toolbar
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-    focusedTool = (focusedTool + 2) % 3;
-    renderToolbarOverlay();
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
-    focusedTool = (focusedTool + 1) % 3;
-    renderToolbarOverlay();
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-    return;
-  }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    activateToolbarTool(focusedTool);
-    return;
-  }
-  // Up/Down scrub through chapters, keeping the toolbar open.
-  const bool prev = mappedInput.wasReleased(MappedInputManager::Button::Up);
-  const bool next = mappedInput.wasReleased(MappedInputManager::Button::Down);
-  if (prev || next) {
-    const int spineCount = epub->getSpineItemsCount();
-    int target = currentSpineIndex + (next ? 1 : -1);
-    if (target < 0) target = 0;
-    if (target > spineCount - 1) target = spineCount - 1;
-    if (target != currentSpineIndex) {
+    if (overlay == Overlay::Text) {
+      // Persist display settings and re-paginate from the current position.
+      SETTINGS.saveToFile();
       RenderLock lock(*this);
-      nextPageNumber = 0;
-      currentSpineIndex = target;
+      if (section) {
+        cachedSpineIndex = currentSpineIndex;
+        cachedChapterTotalPageCount = section->pageCount;
+        nextPageNumber = section->currentPage;
+      }
       section.reset();
     }
-    requestUpdate();  // render() re-renders the page and re-overlays the toolbar
+    overlay = Overlay::Toolbar;  // step back up to the toolbar
+    requestUpdate();
+    return;
+  }
+
+  if (count > 0 && mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+    panelIndex = (panelIndex - 1 + count) % count;
+    fastRedraw();
+    return;
+  }
+  if (count > 0 && mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+    panelIndex = (panelIndex + 1) % count;
+    fastRedraw();
+    return;
+  }
+
+  // --- Panel-specific activation ---
+  if (overlay == Overlay::Text) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      cycleTextRow(panelIndex, -1);
+      fastRedraw();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right) ||
+               mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      cycleTextRow(panelIndex, +1);
+      fastRedraw();
+    }
+  } else if (overlay == Overlay::Contents) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      const auto item = epub->getTocItem(panelIndex);
+      if (item.spineIndex != -1) {
+        RenderLock lock(*this);
+        currentSpineIndex = item.spineIndex;
+        pendingAnchor = item.anchor;
+        nextPageNumber = 0;
+        section.reset();
+      }
+      overlay = Overlay::None;
+      requestUpdate();
+    }
+  } else if (overlay == Overlay::More) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      activateMoreRow(panelIndex);
+    }
   }
 }
 
-void EpubReaderActivity::activateToolbarTool(int tool) {
-  toolbarVisible = false;  // the tool takes over; the page is clean again on return
-  switch (tool) {
+std::string EpubReaderActivity::textRowName(int row) const {
+  switch (row) {
     case 0:
-      onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER);
+      return tr(STR_FONT_FAMILY);
+    case 1:
+      return tr(STR_FONT_SIZE);
+    case 2:
+      return tr(STR_LINE_SPACING);
+    case 3:
+      return tr(STR_PARA_ALIGNMENT);
+    case 4:
+      return tr(STR_FOCUS_READING);
+    default:
+      return "";
+  }
+}
+
+std::string EpubReaderActivity::textRowValue(int row) const {
+  static constexpr StrId kFamily[] = {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS, StrId::STR_OPEN_DYSLEXIC};
+  static constexpr StrId kSize[] = {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE};
+  static constexpr StrId kSpacing[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
+  static constexpr StrId kAlign[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER,
+                                     StrId::STR_ALIGN_RIGHT, StrId::STR_BOOK_S_STYLE};
+  switch (row) {
+    case 0:
+      if (SETTINGS.sdFontFamilyName[0] != '\0') return SETTINGS.sdFontFamilyName;
+      return I18N.get(kFamily[SETTINGS.fontFamily % CrossPointSettings::FONT_FAMILY_COUNT]);
+    case 1:
+      return I18N.get(kSize[SETTINGS.fontSize % CrossPointSettings::FONT_SIZE_COUNT]);
+    case 2:
+      return I18N.get(kSpacing[SETTINGS.lineSpacing % CrossPointSettings::LINE_COMPRESSION_COUNT]);
+    case 3:
+      return I18N.get(kAlign[SETTINGS.paragraphAlignment % CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT]);
+    case 4:
+      return SETTINGS.focusReadingEnabled ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    default:
+      return "";
+  }
+}
+
+void EpubReaderActivity::cycleTextRow(int row, int dir) {
+  const auto wrap = [](int value, int d, int count) { return static_cast<uint8_t>((value + d + count) % count); };
+  switch (row) {
+    case 0:
+      // Cycling always selects a built-in family; drop any SD font override.
+      SETTINGS.fontFamily = wrap(SETTINGS.fontFamily, dir, CrossPointSettings::FONT_FAMILY_COUNT);
+      SETTINGS.sdFontFamilyName[0] = '\0';
       break;
     case 1:
-      openTextPanel();
+      SETTINGS.fontSize = wrap(SETTINGS.fontSize, dir, CrossPointSettings::FONT_SIZE_COUNT);
       break;
     case 2:
+      SETTINGS.lineSpacing = wrap(SETTINGS.lineSpacing, dir, CrossPointSettings::LINE_COMPRESSION_COUNT);
+      break;
+    case 3:
+      SETTINGS.paragraphAlignment =
+          wrap(SETTINGS.paragraphAlignment, dir, CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT);
+      break;
+    case 4:
+      SETTINGS.focusReadingEnabled = SETTINGS.focusReadingEnabled ? 0 : 1;
+      break;
     default:
-      openMoreMenu();
       break;
   }
 }
 
-void EpubReaderActivity::openMoreMenu() {
+void EpubReaderActivity::buildMoreActions() {
+  using MA = EpubReaderMenuActivity::MenuAction;
+  moreActions.clear();
+  if (!currentPageFootnotes.empty()) moreActions.push_back(MA::FOOTNOTES);
+  moreActions.push_back(MA::BOOKMARKS);
+  moreActions.push_back(MA::ROTATE_SCREEN);
+  moreActions.push_back(MA::AUTO_PAGE_TURN);
+  moreActions.push_back(MA::GO_TO_PERCENT);
+  moreActions.push_back(MA::SCREENSHOT);
+  moreActions.push_back(MA::DISPLAY_QR);
+  moreActions.push_back(MA::SYNC);
+  moreActions.push_back(MA::GO_HOME);
+  moreActions.push_back(MA::DELETE_CACHE);
+}
+
+std::string EpubReaderActivity::moreRowName(int row) const {
+  using MA = EpubReaderMenuActivity::MenuAction;
+  if (row < 0 || row >= static_cast<int>(moreActions.size())) return "";
+  switch (moreActions[row]) {
+    case MA::FOOTNOTES:
+      return tr(STR_FOOTNOTES);
+    case MA::BOOKMARKS:
+      return tr(STR_BOOKMARKS);
+    case MA::ROTATE_SCREEN:
+      return tr(STR_ORIENTATION);
+    case MA::AUTO_PAGE_TURN:
+      return tr(STR_AUTO_TURN_PAGES_PER_MIN);
+    case MA::GO_TO_PERCENT:
+      return tr(STR_GO_TO_PERCENT);
+    case MA::SCREENSHOT:
+      return tr(STR_SCREENSHOT_BUTTON);
+    case MA::DISPLAY_QR:
+      return tr(STR_DISPLAY_QR);
+    case MA::SYNC:
+      return tr(STR_SYNC_PROGRESS);
+    case MA::GO_HOME:
+      return tr(STR_GO_HOME_BUTTON);
+    case MA::DELETE_CACHE:
+      return tr(STR_DELETE_CACHE);
+    default:
+      return "";
+  }
+}
+
+std::string EpubReaderActivity::moreRowValue(int row) const {
+  using MA = EpubReaderMenuActivity::MenuAction;
+  static constexpr StrId kOrient[] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
+                                      StrId::STR_LANDSCAPE_CCW};
+  static const char* const kRate[] = {"1", "3", "6", "12"};
+  if (row < 0 || row >= static_cast<int>(moreActions.size())) return "";
+  if (moreActions[row] == MA::ROTATE_SCREEN) {
+    return I18N.get(kOrient[SETTINGS.orientation % SETTINGS.ORIENTATION_COUNT]);
+  }
+  if (moreActions[row] == MA::AUTO_PAGE_TURN) {
+    return autoTurnOption == 0 ? std::string(tr(STR_STATE_OFF)) : kRate[(autoTurnOption - 1) % 4];
+  }
+  return "";
+}
+
+void EpubReaderActivity::activateMoreRow(int row) {
+  using MA = EpubReaderMenuActivity::MenuAction;
+  if (row < 0 || row >= static_cast<int>(moreActions.size())) return;
+  const auto action = moreActions[row];
+  if (action == MA::ROTATE_SCREEN) {
+    applyOrientation((SETTINGS.orientation + 1) % SETTINGS.ORIENTATION_COUNT);
+    requestUpdate();  // re-render rotated page + More panel
+    return;
+  }
+  if (action == MA::AUTO_PAGE_TURN) {
+    autoTurnOption = (autoTurnOption + 1) % 5;
+    toggleAutoPageTurn(autoTurnOption);
+    requestUpdate();
+    return;
+  }
+  // Leaf actions open their own screen / perform the action; close the overlay first.
+  overlay = Overlay::None;
+  onReaderMenuConfirm(action);
+}
+
+void EpubReaderActivity::openClassicReaderMenu() {
   const int currentPage = section ? section->currentPage + 1 : 0;
   const int totalPages = section ? section->pageCount : 0;
   float bookProgress = 0.0f;
@@ -1270,22 +1508,6 @@ void EpubReaderActivity::openMoreMenu() {
                            if (!result.isCancelled) {
                              onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
                            }
-                         });
-}
-
-void EpubReaderActivity::openTextPanel() {
-  startActivityForResult(std::make_unique<EpubReaderTextActivity>(renderer, mappedInput),
-                         [this](const ActivityResult&) {
-                           // Reader display settings may have changed; re-paginate from the
-                           // current position (proportionally, like a settings change).
-                           RenderLock lock(*this);
-                           if (section) {
-                             cachedSpineIndex = currentSpineIndex;
-                             cachedChapterTotalPageCount = section->pageCount;
-                             nextPageNumber = section->currentPage;
-                           }
-                           section.reset();
-                           requestUpdate();
                          });
 }
 
