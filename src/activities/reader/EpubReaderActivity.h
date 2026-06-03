@@ -78,6 +78,9 @@ class EpubReaderActivity final : public Activity {
   std::string textRowValue(int row) const;
   void cycleTextRow(int row, int dir);
   void openTextFontPicker();
+  // Persist reader display settings, (re)load the selected SD font, and re-paginate
+  // the current chapter so changes apply without re-opening the book.
+  void applyReaderTextSettings();
   // More panel rows.
   void buildMoreActions();
   std::string moreRowName(int row) const;
