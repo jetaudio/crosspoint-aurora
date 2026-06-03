@@ -33,6 +33,8 @@
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontSystem.h"
+#include "activities/settings/FontSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -1280,14 +1282,14 @@ void EpubReaderActivity::handleOverlayInput() {
     return;
   }
 
-  // --- Panels: shared Up/Down navigation and Back ---
+  // --- Panels (Contents / Text / More) ---
   const int count = overlay == Overlay::Contents ? epub->getTocItemsCount()
                     : overlay == Overlay::Text   ? kTextRowCount
                                                  : static_cast<int>(moreActions.size());
 
+  // Back steps up to the toolbar (Text persists + re-paginates first).
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (overlay == Overlay::Text) {
-      // Persist display settings and re-paginate from the current position.
       SETTINGS.saveToFile();
       RenderLock lock(*this);
       if (section) {
@@ -1297,34 +1299,23 @@ void EpubReaderActivity::handleOverlayInput() {
       }
       section.reset();
     }
-    overlay = Overlay::Toolbar;  // step back up to the toolbar
+    overlay = Overlay::Toolbar;
     requestUpdate();
     return;
   }
 
-  if (count > 0 && mappedInput.wasReleased(MappedInputManager::Button::Up)) {
-    panelIndex = (panelIndex - 1 + count) % count;
-    fastRedraw();
-    return;
-  }
-  if (count > 0 && mappedInput.wasReleased(MappedInputManager::Button::Down)) {
-    panelIndex = (panelIndex + 1) % count;
-    fastRedraw();
-    return;
-  }
-
-  // --- Panel-specific activation ---
-  if (overlay == Overlay::Text) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
-      cycleTextRow(panelIndex, -1);
-      fastRedraw();
-    } else if (mappedInput.wasReleased(MappedInputManager::Button::Right) ||
-               mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      cycleTextRow(panelIndex, +1);
-      fastRedraw();
-    }
-  } else if (overlay == Overlay::Contents) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  // Select activates the highlighted row: change a value / jump to a chapter /
+  // run an action. (Up/Down/Left/Right only move the selection — see below.)
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (overlay == Overlay::Text) {
+      if (panelIndex == 0) {
+        openTextFontPicker();  // full font list, same as Settings
+      } else {
+        cycleTextRow(panelIndex, +1);
+        SETTINGS.saveToFile();  // persist immediately so changes always stick
+        fastRedraw();
+      }
+    } else if (overlay == Overlay::Contents) {
       const auto item = epub->getTocItem(panelIndex);
       if (item.spineIndex != -1) {
         RenderLock lock(*this);
@@ -1335,10 +1326,22 @@ void EpubReaderActivity::handleOverlayInput() {
       }
       overlay = Overlay::None;
       requestUpdate();
-    }
-  } else if (overlay == Overlay::More) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    } else if (overlay == Overlay::More) {
       activateMoreRow(panelIndex);
+    }
+    return;
+  }
+
+  // Up/Down (side) and Left/Right (front) all move the selection between rows.
+  if (count > 0) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      panelIndex = ButtonNavigator::previousIndex(panelIndex, count);
+      fastRedraw();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Down) ||
+               mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+      panelIndex = ButtonNavigator::nextIndex(panelIndex, count);
+      fastRedraw();
     }
   }
 }
@@ -1407,6 +1410,17 @@ void EpubReaderActivity::cycleTextRow(int row, int dir) {
     default:
       break;
   }
+}
+
+void EpubReaderActivity::openTextFontPicker() {
+  // Reuse the Settings font picker so the reader offers the exact same set of
+  // built-in + SD-card fonts.
+  startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
+                         [this](const ActivityResult&) {
+                           SETTINGS.saveToFile();
+                           overlay = Overlay::Text;  // return to the Text panel
+                           requestUpdate();          // re-render page + Text panel
+                         });
 }
 
 void EpubReaderActivity::buildMoreActions() {

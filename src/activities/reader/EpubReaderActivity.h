@@ -73,6 +73,7 @@ class EpubReaderActivity final : public Activity {
   std::string textRowName(int row) const;
   std::string textRowValue(int row) const;
   void cycleTextRow(int row, int dir);
+  void openTextFontPicker();
   // More panel rows.
   void buildMoreActions();
   std::string moreRowName(int row) const;
