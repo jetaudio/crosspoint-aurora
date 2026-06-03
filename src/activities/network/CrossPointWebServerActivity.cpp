@@ -14,7 +14,6 @@
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
-#include "activities/util/HomeTabBar.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -269,10 +268,6 @@ void CrossPointWebServerActivity::startWebServer() {
 void CrossPointWebServerActivity::loop() {
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
-    // Aurora "Transfer" tab: Left/Right switch bottom-bar tabs (tears down the
-    // server via the normal activity replace).
-    if (GUI.ownsHomeLayout() && HomeTabBar::handleLeftRight(mappedInput, HomeTabBar::Transfer)) return;
-
     // Handle DNS requests for captive portal (AP mode only)
     if (isApMode && dnsServer) {
       dnsServer->processNextRequest();
@@ -467,15 +462,10 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
   }
 
-  if (GUI.ownsHomeLayout()) {
-    // Aurora: Back exits; front Left/Right switch tabs; persistent bottom bar.
-    const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    HomeTabBar::draw(renderer, renderer.getScreenWidth(), renderer.getScreenHeight(), HomeTabBar::Transfer);
-  } else {
-    const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  }
+  // Sub-page of the Transfer tab: no persistent bottom bar and no tab switching
+  // here (Back exits). The bar lives only on the four main tab landing screens.
+  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void CrossPointWebServerActivity::renderWifiIndicator(int subHeaderTop) const {
