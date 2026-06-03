@@ -469,3 +469,99 @@ void AuroraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount
     }
   }
 }
+
+void AuroraTheme::drawReaderToolbar(GfxRenderer& renderer, Rect screen, const ReaderToolbarInfo& info) const {
+  const int X = screen.x;
+  const int Y = screen.y;
+  const int W = screen.width;
+  const int H = screen.height;
+  const int pad = 20;
+
+  // Chevron ("<" / ">") drawn from strokes so we don't depend on font glyph coverage.
+  auto chevron = [&](int cx, int cy, int s, bool left) {
+    const int dx = left ? -s / 2 : s / 2;
+    renderer.drawLine(cx - dx, cy - s, cx + dx, cy, 2, true);
+    renderer.drawLine(cx + dx, cy, cx - dx, cy + s, 2, true);
+  };
+
+  // --- Top bar: back chevron (left), centered book title, focus indicator (right) ---
+  const int topH = 50;
+  renderer.fillRect(X, Y, W, topH, false);  // clear the page text behind the bar
+  renderer.drawLine(X, Y + topH, X + W, Y + topH);
+
+  chevron(X + 26, Y + topH / 2, 8, true);
+
+  if (info.bookTitle != nullptr) {
+    const auto t = renderer.truncatedText(kTitleFontId, info.bookTitle, W - 120, EpdFontFamily::BOLD);
+    const int th = renderer.getLineHeight(kTitleFontId);
+    renderer.drawCenteredText(kTitleFontId, Y + (topH - th) / 2, t.c_str(), true, EpdFontFamily::BOLD);
+  }
+
+  // Focus-reading indicator: a small ring, filled when focus reading is on.
+  const int fz = 16;
+  const int fx = X + W - 26;
+  const int fy = Y + topH / 2;
+  renderer.drawRoundedRect(fx - fz / 2, fy - fz / 2, fz, fz, 1, fz / 2, true);
+  if (info.focusReadingOn) {
+    renderer.fillRoundedRect(fx - 3, fy - 3, 6, 6, 3, Color::Black);
+  }
+
+  // --- Bottom bar: scrub row, meta row, tool row ---
+  const int bottomH = 160;
+  const int by = Y + H - bottomH;
+  renderer.fillRect(X, by, W, bottomH, false);
+  renderer.drawLine(X, by, X + W, by);
+
+  // Scrub row: prev/next chapter buttons flanking a progress track + knob.
+  const int btn = 34;
+  const int sy = by + 16;
+  const int leftBtnX = X + 16;
+  const int rightBtnX = X + W - 16 - btn;
+  renderer.drawRoundedRect(leftBtnX, sy, btn, btn, 1, 7, true);
+  renderer.drawRoundedRect(rightBtnX, sy, btn, btn, 1, 7, true);
+  chevron(leftBtnX + btn / 2, sy + btn / 2, 6, true);
+  chevron(rightBtnX + btn / 2, sy + btn / 2, 6, false);
+  const int trackX0 = leftBtnX + btn + 14;
+  const int trackX1 = rightBtnX - 14;
+  const int trackY = sy + btn / 2;
+  renderer.drawLine(trackX0, trackY, trackX1, trackY, 2, true);
+  const float prog = std::max(0.0f, std::min(1.0f, info.progress));
+  const int knobX = trackX0 + static_cast<int>(prog * (trackX1 - trackX0));
+  renderer.fillRoundedRect(knobX - 6, trackY - 6, 12, 12, 6, Color::Black);
+
+  // Meta row: chapter title (left), chapter page X/Y + book percent (right).
+  const int my = by + 64;
+  renderer.drawLine(X + 16, my, X + W - 16, my);
+  if (info.chapterTitle != nullptr && info.chapterTitle[0] != '\0') {
+    const auto ch = renderer.truncatedText(kCaptionFontId, info.chapterTitle, W / 2 - pad, EpdFontFamily::BOLD);
+    renderer.drawText(kCaptionFontId, X + pad, my + 7, ch.c_str(), true, EpdFontFamily::BOLD);
+  }
+  const std::string pageInfo = std::string(tr(STR_PAGE_LABEL)) + " " + std::to_string(info.chapterPage) + "/" +
+                               std::to_string(info.chapterPageCount) + "   " + std::to_string(info.bookPercent) + "%";
+  const int pw = renderer.getTextWidth(kCaptionFontId, pageInfo.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(kCaptionFontId, X + W - pad - pw, my + 7, pageInfo.c_str(), true, EpdFontFamily::BOLD);
+
+  // Tool row: Contents / Text / More, focused one in a rounded pill. Glyphs drawn
+  // from primitives (hamburger / "Aa" / three dots) to avoid font-glyph deps.
+  const int ty = by + 90;
+  renderer.drawLine(X + 16, ty, X + W - 16, ty);
+  const char* labels[3] = {tr(STR_TOOL_CONTENTS), tr(STR_TOOL_TEXT), tr(STR_TOOL_MORE)};
+  const int slotW = W / 3;
+  for (int i = 0; i < 3; ++i) {
+    const int cx = X + slotW * i + slotW / 2;
+    if (i == info.focusedTool) {
+      renderer.drawRoundedRect(cx - 44, ty + 6, 88, 40, 2, 10, true);
+    }
+    const int gy = ty + 14;
+    if (i == 0) {  // Contents: hamburger
+      for (int k = 0; k < 3; ++k) renderer.drawLine(cx - 12, gy + k * 6, cx + 12, gy + k * 6, 2, true);
+    } else if (i == 1) {  // Text: "Aa"
+      const int aw = renderer.getTextWidth(kTitleFontId, "Aa", EpdFontFamily::BOLD);
+      renderer.drawText(kTitleFontId, cx - aw / 2, ty + 8, "Aa", true, EpdFontFamily::BOLD);
+    } else {  // More: three dots
+      for (int k = -1; k <= 1; ++k) renderer.fillRect(cx + k * 8 - 1, gy + 6, 3, 3, true);
+    }
+    const int lw = renderer.getTextWidth(kBarLabelFontId, labels[i], EpdFontFamily::BOLD);
+    renderer.drawText(kBarLabelFontId, cx - lw / 2, ty + 46, labels[i], true, EpdFontFamily::BOLD);
+  }
+}

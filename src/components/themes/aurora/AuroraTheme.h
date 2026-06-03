@@ -40,6 +40,9 @@ class AuroraTheme : public BaseTheme {
   void drawSettingsScreen(GfxRenderer& renderer, Rect content, const char* title,
                           const std::vector<SettingsListItem>& items) const override;
 
+  bool ownsReaderChrome() const override { return true; }
+  void drawReaderToolbar(GfxRenderer& renderer, Rect screen, const ReaderToolbarInfo& info) const override;
+
   // Aurora restyle of the shared list/header primitives so every screen that uses
   // them (reader menu, TOC, file browser, recent books, ...) gets the Aurora look:
   // a status-bar style header and rounded light-gray selected rows.

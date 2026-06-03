@@ -46,6 +46,11 @@ class EpubReaderActivity final : public Activity {
   // Consumed in onExit() to relocate the finished book into /Read/.
   bool pendingReadFolderMove = false;
 
+  // Aurora reader toolbar overlay (shown on Select instead of the classic list
+  // menu). focusedTool: 0=Contents, 1=Text, 2=More.
+  bool toolbarVisible = false;
+  int focusedTool = 0;
+
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
   struct SavedPosition {
@@ -59,6 +64,13 @@ class EpubReaderActivity final : public Activity {
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void renderStatusBar() const;
+  // Aurora toolbar overlay: draw it over the current page, and activate the focused tool.
+  void handleToolbarInput();
+  void renderToolbarOverlay() const;
+  void activateToolbarTool(int tool);
+  void openMoreMenu();
+  void openTextPanel();
+  std::string currentChapterTitle() const;
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
