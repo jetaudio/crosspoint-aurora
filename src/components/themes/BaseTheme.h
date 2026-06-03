@@ -268,6 +268,11 @@ class BaseTheme {
   // Draws the reader toolbar overlay (top bar + bottom scrub/meta/tool rows) on
   // top of the already-rendered page. `screen` is the full screen rect.
   virtual void drawReaderToolbar(GfxRenderer&, Rect /*screen*/, const ReaderToolbarInfo& /*info*/) const {}
+  // Draws a reader overlay panel (a bottom sheet with a title and a scrollable
+  // item list) over the page — the Aurora reader's Contents/Text/More tools.
+  virtual void drawReaderPanel(GfxRenderer&, Rect /*screen*/, const char* /*title*/, int /*itemCount*/,
+                               int /*selectedIndex*/, const std::function<std::string(int)>& /*rowText*/,
+                               const std::function<std::string(int)>& /*rowValue*/ = nullptr) const {}
   virtual void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                               const std::function<std::string(int index)>& buttonLabel,
                               const std::function<UIIcon(int index)>& rowIcon) const;
