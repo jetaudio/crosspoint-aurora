@@ -1290,14 +1290,7 @@ void EpubReaderActivity::handleOverlayInput() {
   // Back steps up to the toolbar (Text persists + re-paginates first).
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (overlay == Overlay::Text) {
-      SETTINGS.saveToFile();
-      RenderLock lock(*this);
-      if (section) {
-        cachedSpineIndex = currentSpineIndex;
-        cachedChapterTotalPageCount = section->pageCount;
-        nextPageNumber = section->currentPage;
-      }
-      section.reset();
+      applyReaderTextSettings();
     }
     overlay = Overlay::Toolbar;
     requestUpdate();
@@ -1417,10 +1410,25 @@ void EpubReaderActivity::openTextFontPicker() {
   // built-in + SD-card fonts.
   startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
                          [this](const ActivityResult&) {
-                           SETTINGS.saveToFile();
-                           overlay = Overlay::Text;  // return to the Text panel
-                           requestUpdate();          // re-render page + Text panel
+                           applyReaderTextSettings();  // load the new font + re-paginate now
+                           overlay = Overlay::Text;    // return to the Text panel
+                           requestUpdate();            // re-render page + Text panel
                          });
+}
+
+void EpubReaderActivity::applyReaderTextSettings() {
+  SETTINGS.saveToFile();
+  // (Re)load or unload the selected SD-card font for the current family/size. The
+  // reader otherwise only loads SD fonts on book open (ReaderActivity), so without
+  // this an in-reader font change wouldn't take effect until re-opening the book.
+  sdFontSystem.ensureLoaded(renderer);
+  RenderLock lock(*this);
+  if (section) {
+    cachedSpineIndex = currentSpineIndex;
+    cachedChapterTotalPageCount = section->pageCount;
+    nextPageNumber = section->currentPage;
+  }
+  section.reset();  // force re-pagination with the new settings
 }
 
 void EpubReaderActivity::buildMoreActions() {
