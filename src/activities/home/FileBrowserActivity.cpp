@@ -374,7 +374,7 @@ void FileBrowserActivity::render(RenderLock&&) {
   std::string folderName =
       (mode == Mode::PickFirmware)
           ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
-          : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
+          : ((basepath == "/") ? std::string(tr(STR_BROWSER)) : basepath.substr(basepath.rfind('/') + 1));
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
 
   // Aurora "Browse" tab reserves the persistent bottom bar (and only the hint
