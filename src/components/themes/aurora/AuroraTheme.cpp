@@ -26,7 +26,8 @@
 
 namespace {
 constexpr int kStatusY = 12;       // Status bar text baseline (top of cell)
-constexpr int kDividerGap = 26;    // Distance from status text to the divider line
+constexpr int kDividerGap = 32;    // Distance from status text to the divider line
+                                   // (sized for the large UI_12 page title)
 constexpr int kThumbHeight = 240;  // Featured cover thumbnail height (large, Lyra-style)
 constexpr int kThumbWidth = 160;   // Featured cover thumbnail width (~2:3)
 constexpr int kTextGap = 16;       // Gap between thumbnail and title block
@@ -74,8 +75,8 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: product label (left), clock (center, X3 only), battery (right) ---
-  renderer.drawText(kCaptionFontId, P, kStatusY, "CrossPoint", true, EpdFontFamily::BOLD);
+  // --- Status bar: page title (left, large+bold), clock (center, X3 only), battery (right) ---
+  renderer.drawText(kTitleFontId, P, kStatusY, tr(STR_LIBRARY), true, EpdFontFamily::BOLD);
 
   if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
     char timeBuf[9];
@@ -159,9 +160,11 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     renderer.drawCenteredText(kTitleFontId, emptyY, tr(STR_NO_OPEN_BOOK));
   }
 
-  // --- "Library" header + recent-books list (books only; nav lives in the bottom bar) ---
+  // --- "Recent Books" header + recent-books list (books only; nav lives in the bottom bar) ---
+  // The page title is now "Library", so this in-content section uses "Recent Books"
+  // to avoid showing "Library" twice on the same screen.
   const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
-  renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_LIBRARY), true, EpdFontFamily::BOLD);
+  renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
   const int underlineY = libHeaderY + renderer.getLineHeight(kHeaderFontId) + 4;
   renderer.drawLine(P, underlineY, W - P, underlineY);
 
@@ -220,8 +223,8 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: title (left), clock (X3 only), battery (right), divider ---
-  renderer.drawText(kCaptionFontId, P, kStatusY, title, true, EpdFontFamily::BOLD);
+  // --- Status bar: title (left, large+bold), clock (X3 only), battery (right), divider ---
+  renderer.drawText(kTitleFontId, P, kStatusY, title, true, EpdFontFamily::BOLD);
   if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
