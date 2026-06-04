@@ -292,7 +292,7 @@ pub fn run(p: Peripherals) -> ! {
         // Power button held (active low) → shut down via the latch.
         if power_btn.is_low() {
             eink.deep_sleep();
-            crate::power::power_off(p.GPIO13);
+            crate::power::power_off(p.GPIO13, p.LPWR);
         }
 
         delay_loop.delay_ms(40); // ~25 Hz input poll, matches a debounce window.
