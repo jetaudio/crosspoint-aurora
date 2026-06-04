@@ -45,15 +45,17 @@ const BOOK_BUF_SIZE: usize = 32 * 1024;
 static mut BOOK_BUF: [u8; BOOK_BUF_SIZE] = [0; BOOK_BUF_SIZE];
 
 /// Buffer a whole EPUB (ZIP) is read into before its first chapter is inflated
-/// into BOOK_BUF. 64 KB caps the EPUB size we can open in RAM; larger books need
-/// streaming (roadmap). Lives in `.bss`.
-const EPUB_BUF_SIZE: usize = 64 * 1024;
+/// into BOOK_BUF. 32 KB on the Wi-Fi build (the radio's heap + task arena take
+/// RAM); larger books need streaming (roadmap). Lives in `.bss`.
+const EPUB_BUF_SIZE: usize = 32 * 1024;
 static mut EPUB_BUF: [u8; EPUB_BUF_SIZE] = [0; EPUB_BUF_SIZE];
 
 /// Bring up the board and run the async app loop forever.
-pub async fn run(mut p: Peripherals) -> ! {
-    // Start our embassy-time driver (1 ms SystemTimer tick) before any await.
-    crate::time_driver::init(p.SYSTIMER);
+pub async fn run(spawner: embassy_executor::Spawner, mut p: Peripherals) -> ! {
+    // Our embassy-time driver on alarm0; the Wi-Fi radio uses alarm1.
+    let systimer = esp_hal::timer::systimer::SystemTimer::new(p.SYSTIMER);
+    crate::time_driver::init(systimer.alarm0);
+    crate::wifi::init(systimer.alarm1, p.RNG, p.RADIO_CLK, p.WIFI, spawner);
 
     let delay = Delay::new();
 
@@ -89,12 +91,12 @@ pub async fn run(mut p: Peripherals) -> ! {
     // and dropped before the ADC takes GPIO0 below. (SDA=20, SCL=0, 400 kHz.)
     let variant = {
         let mut i2c = I2c::new(
-            p.I2C0.reborrow(),
+            &mut p.I2C0,
             I2cConfig::default().with_frequency(Rate::from_khz(400)),
         )
         .expect("I2C init")
-        .with_sda(p.GPIO20.reborrow())
-        .with_scl(p.GPIO0.reborrow());
+        .with_sda(&mut p.GPIO20)
+        .with_scl(&mut p.GPIO0);
         let mut d = delay;
         if crate::detect::is_x3(&mut i2c, &mut d) {
             Variant::X3
@@ -135,7 +137,7 @@ pub async fn run(mut p: Peripherals) -> ! {
     // Battery sense on GPIO0 with curve calibration → reads come back in mV
     // (the ÷2 divider is undone in `battery::percentage_from_adc_millivolts`).
     let mut bat_pin =
-        adc_cfg.enable_pin_with_cal::<_, AdcCalCurve<ADC1<'static>>>(p.GPIO0, Attenuation::_11dB);
+        adc_cfg.enable_pin_with_cal::<_, AdcCalCurve<ADC1>>(p.GPIO0, Attenuation::_11dB);
     let mut adc = Adc::new(p.ADC1, adc_cfg);
 
     // Power button (GPIO3, active low). Held long here would trigger power_off.

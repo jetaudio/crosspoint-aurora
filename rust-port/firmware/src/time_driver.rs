@@ -16,9 +16,8 @@ use critical_section::Mutex;
 use embassy_time_driver::Driver;
 use embassy_time_queue_utils::Queue;
 use esp_hal::handler;
-use esp_hal::peripherals::SYSTIMER;
 use esp_hal::time::Duration;
-use esp_hal::timer::systimer::{Alarm, SystemTimer};
+use esp_hal::timer::systimer::Alarm;
 use esp_hal::timer::Timer; // trait: now/load_value/enable_interrupt/…
 
 /// Milliseconds since `init` (== embassy ticks, since TICK_HZ = 1000).
@@ -26,7 +25,7 @@ static MILLIS: Mutex<Cell<u64>> = Mutex::new(Cell::new(0));
 /// Pending `embassy-time` timers.
 static QUEUE: Mutex<RefCell<Queue>> = Mutex::new(RefCell::new(Queue::new()));
 /// The 1 ms alarm, kept reachable so the ISR can acknowledge it.
-static ALARM: Mutex<RefCell<Option<Alarm<'static>>>> = Mutex::new(RefCell::new(None));
+static ALARM: Mutex<RefCell<Option<Alarm>>> = Mutex::new(RefCell::new(None));
 
 struct EspDriver;
 embassy_time_driver::time_driver_impl!(static DRIVER: EspDriver = EspDriver);
@@ -56,10 +55,9 @@ fn tick() {
     });
 }
 
-/// Start the 1 ms tick. Call once at boot before any `embassy-time` use.
-pub fn init(systimer: SYSTIMER<'static>) {
-    let st = SystemTimer::new(systimer);
-    let alarm = st.alarm0;
+/// Start the 1 ms tick on the given alarm. Call once at boot before any
+/// `embassy-time` use.
+pub fn init(alarm: Alarm) {
     alarm.set_interrupt_handler(tick);
     alarm.enable_auto_reload(true);
     alarm.enable_interrupt(true);

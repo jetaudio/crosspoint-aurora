@@ -12,16 +12,23 @@ path = "src/main.rs"
 [dependencies]
 crosspoint-core = { path = "../core" }
 
-# Core HAL — esp-hal 1.x STABLE, with embassy on top via OUR OWN time driver
-# (`src/time_driver.rs`, backed by a 1 ms SystemTimer tick) instead of
-# `esp-hal-embassy` (which only pairs with pre-release esp-hal). This satisfies
-# BOTH Step-2 requirements at once: latest stable esp-hal AND embassy.
-esp-hal = { version = "=1.1.1", features = ["esp32c3", "unstable"] }
-esp-bootloader-esp-idf = { version = "=0.2.0", features = ["esp32c3"] }
-esp-backtrace = { version = "=0.17.0", features = ["esp32c3", "panic-handler", "println"] }
-esp-println = { version = "=0.15.0", features = ["esp32c3", "log-04"] }
+# ── Wi-Fi-enabled variant (rust-wifi branch) ─────────────────────────────────
+# Including Wi-Fi forces relaxing BOTH Step 2 ("stable esp-hal") and Step 3
+# ("no global allocator"): the only Wi-Fi stack, esp-wifi, (1) needs a global
+# allocator and (2) only compiles on a PRE-RELEASE esp-hal (it uses beta-era
+# internals removed in stable — esp-hal 1.1.1 gives 27 errors). So this variant
+# pins esp-hal 1.0.0-rc.0 + esp-hal-embassy + esp-alloc + esp-wifi. The `rust`
+# branch keeps stable+zero-alloc and everything except Wi-Fi. App data stays
+# zero-alloc — the heap is only for esp-wifi's internal use.
+esp-hal = { version = "=1.0.0-beta.0", features = ["esp32c3", "unstable"] }
+esp-alloc = "0.7"
+esp-wifi = { version = "=0.13.0", features = ["esp32c3", "wifi"] }
+esp-backtrace = { version = "=0.15.0", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "=0.13.0", features = ["esp32c3", "auto"] }
 
-# embassy: the thread-mode riscv executor + our custom time driver.
+# embassy via our own time driver: esp-hal-embassy that pairs with beta.0 wants a
+# different esp-hal than esp-wifi does, so we reuse the stable branch's custom
+# 1 ms SystemTimer driver instead.
 embassy-executor = { version = "0.7", features = [
     "arch-riscv32",
     "executor-thread",
