@@ -158,6 +158,16 @@ pub fn run(mut p: Peripherals) -> ! {
         }
     }
     let mut home = AuroraHome::new(library);
+
+    // Load persisted reader settings from the SD card, if present.
+    {
+        let dev = RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
+        if let Some((lh, mg)) = crate::sd::load_settings(dev, delay) {
+            settings = Settings::from_raw(lh, mg);
+            esp_println::println!("crosspoint-rs: loaded settings lh={} mg={}", lh, mg);
+        }
+    }
+
     // The reader is created when a book is opened from the home library.
     let mut reader: Option<Reader> = None;
     let mut active = Active::Home;
@@ -279,6 +289,16 @@ pub fn run(mut p: Peripherals) -> ! {
                     Some(Event::PrevPage) => (settings.dec(), false),
                     Some(Event::NextPage) => (settings.inc(), false),
                     Some(Event::Back) => {
+                        // Persist settings to the SD card on the way out.
+                        let dev =
+                            RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
+                        let ok = crate::sd::save_settings(
+                            dev,
+                            delay,
+                            settings.line_height(),
+                            settings.margin(),
+                        );
+                        esp_println::println!("crosspoint-rs: settings saved={}", ok);
                         active = Active::Home;
                         (true, true)
                     }

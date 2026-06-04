@@ -101,3 +101,65 @@ where
     }
     total
 }
+
+/// Settings file name (8.3) in the SD root: line_height (u16 LE) + margin (u16 LE).
+const SETTINGS_FILE: &str = "SETTINGS.CFG";
+
+/// Load persisted reader settings `(line_height, margin)` from the SD root, or
+/// `None` if absent / unreadable. Consumes the SPI device.
+pub fn load_settings<SPI, D>(spi: SPI, delay: D) -> Option<(u16, u16)>
+where
+    SPI: SpiDevice,
+    D: DelayNs,
+{
+    let sdcard = SdCard::new(spi, delay);
+    let volume_mgr = VolumeManager::new(sdcard, NoClock);
+    let volume = volume_mgr.open_volume(VolumeIdx(0)).ok()?;
+    let root = volume.open_root_dir().ok()?;
+    let file = root.open_file_in_dir(SETTINGS_FILE, Mode::ReadOnly).ok()?;
+    let mut buf = [0u8; 4];
+    let mut total = 0;
+    while total < 4 && !file.is_eof() {
+        match file.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(n) => total += n,
+            Err(_) => return None,
+        }
+    }
+    if total < 4 {
+        return None;
+    }
+    Some((
+        u16::from_le_bytes([buf[0], buf[1]]),
+        u16::from_le_bytes([buf[2], buf[3]]),
+    ))
+}
+
+/// Persist reader settings to the SD root. Returns true on success. Consumes the
+/// SPI device.
+pub fn save_settings<SPI, D>(spi: SPI, delay: D, line_height: u16, margin: u16) -> bool
+where
+    SPI: SpiDevice,
+    D: DelayNs,
+{
+    let sdcard = SdCard::new(spi, delay);
+    let volume_mgr = VolumeManager::new(sdcard, NoClock);
+    let volume = match volume_mgr.open_volume(VolumeIdx(0)) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let root = match volume.open_root_dir() {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let file = match root.open_file_in_dir(SETTINGS_FILE, Mode::ReadWriteCreateOrTruncate) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut bytes = [0u8; 4];
+    bytes[0..2].copy_from_slice(&line_height.to_le_bytes());
+    bytes[2..4].copy_from_slice(&margin.to_le_bytes());
+    let ok = file.write(&bytes).is_ok();
+    // Closing flushes the directory entry + FAT; without it the write is lost.
+    ok && file.close().is_ok()
+}

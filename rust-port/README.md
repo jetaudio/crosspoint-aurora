@@ -117,7 +117,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Battery % curve + status-bar read (GPIO0, calibrated) | ✅ from `BatteryMonitor.cpp` (host-tested) |
 | Aurora-style status bar (title + battery + divider) | ✅ from `AuroraTheme::drawHeaderBar` |
 | Aurora home: featured card + library list + tab bar + two-zone nav | ✅ (state machine host-tested) |
-| Settings screen (line spacing / margin → reader layout) | ✅ (host-tested; in-memory) |
+| Settings screen (line spacing / margin → reader layout) | ✅ (host-tested) |
+| Settings persistence to SD (`SETTINGS.CFG`, load on boot / save on exit) | ✅ |
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
@@ -152,7 +153,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
    and variable-width `advance` are done — see `core/glyphfont.rs`).
 3. EPUB refinements: OPF spine ordering (multi-chapter reading order) and
    streaming large EPUBs from SD instead of the 64 KB in-RAM cap.
-4. Persist the last-read position per book.
+4. Persist the last-read position per book (reader settings already persist to
+   `SETTINGS.CFG` on the SD card).
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Persist settings to the SD card (the in-memory Settings screen works); the
    File-Transfer tab (needs Wi-Fi, below).

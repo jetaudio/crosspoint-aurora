@@ -37,6 +37,15 @@ impl Settings {
         Self::default()
     }
 
+    /// Reconstruct from persisted raw values (clamped into valid ranges).
+    pub fn from_raw(line_height: u16, margin: u16) -> Self {
+        Self {
+            line_height: line_height.clamp(LINE_MIN, LINE_MAX),
+            margin: margin.clamp(MARGIN_MIN, MARGIN_MAX),
+            cursor: 0,
+        }
+    }
+
     pub fn line_height(&self) -> u16 {
         self.line_height
     }
