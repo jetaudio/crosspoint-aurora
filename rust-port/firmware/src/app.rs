@@ -13,6 +13,7 @@ use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
+use embedded_graphics::primitives::{Line, PrimitiveStyle};
 use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::delay::DelayNs;
 
@@ -145,8 +146,14 @@ pub fn run(p: Peripherals) -> ! {
     };
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_active(&mut eink, active, &home, &browser, reader.as_ref());
-    draw_battery(&mut eink, battery_pct);
+    draw_active(
+        &mut eink,
+        active,
+        &home,
+        &browser,
+        reader.as_ref(),
+        battery_pct,
+    );
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -250,8 +257,14 @@ pub fn run(p: Peripherals) -> ! {
                     };
                     crosspoint_core::battery::percentage_from_adc_millivolts(mv)
                 };
-                draw_active(&mut eink, active, &home, &browser, reader.as_ref());
-                draw_battery(&mut eink, battery_pct);
+                draw_active(
+                    &mut eink,
+                    active,
+                    &home,
+                    &browser,
+                    reader.as_ref(),
+                    battery_pct,
+                );
                 let mode = if screen_change {
                     RefreshMode::Full
                 } else {
@@ -313,31 +326,56 @@ fn draw_active<D>(
     home: &Menu,
     browser: &Menu,
     reader: Option<&Reader>,
+    pct: u8,
 ) where
     D: DrawTarget<Color = BinaryColor>,
 {
     match active {
-        Active::Home => draw_menu(target, "CrossPoint", home),
-        Active::Browser => draw_menu(target, "Books", browser),
+        Active::Home => draw_menu(target, "CrossPoint", home, pct),
+        Active::Browser => draw_menu(target, "Books", browser, pct),
         Active::Reader => {
             if let Some(r) = reader {
-                draw_reader(target, r);
+                draw_reader(target, r, pct);
             }
         }
     }
 }
 
-/// Render a titled vertical menu (Home / Browser).
-fn draw_menu<D>(target: &mut D, title: &str, menu: &Menu)
+/// Aurora-style slim status bar: page title (left, bold), battery % (right), and
+/// a divider rule below. Ported from `AuroraTheme::drawHeaderBar`.
+fn draw_status_bar<D>(target: &mut D, title: &str, pct: u8)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    let _ = target.clear(BinaryColor::Off); // white
     let title_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
 
     let _ = Text::with_baseline(title, Point::new(16, 6), title_style, Baseline::Top).draw(target);
 
+    // Battery %, right-aligned (FONT_6X10 is 6 px/char).
+    let mut buf: heapless::String<8> = heapless::String::new();
+    let _ = write!(buf, "{pct}%");
+    let bx = pins::X4_WIDTH as i32 - 16 - (buf.len() as i32) * 6;
+    let _ = Text::with_baseline(&buf, Point::new(bx, 8), body_style, Baseline::Top).draw(target);
+
+    // Divider rule below the bar.
+    let _ = Line::new(
+        Point::new(16, 28),
+        Point::new(pins::X4_WIDTH as i32 - 16, 28),
+    )
+    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+    .draw(target);
+}
+
+/// Render a titled vertical menu (Home / Browser).
+fn draw_menu<D>(target: &mut D, title: &str, menu: &Menu, pct: u8)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let _ = target.clear(BinaryColor::Off); // white
+    draw_status_bar(target, title, pct);
+
+    let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
     let menu_metrics = PageMetrics {
         width: pins::X4_WIDTH,
         height: pins::X4_HEIGHT,
@@ -348,38 +386,16 @@ where
     let _ = ui::render_menu(target, menu, &menu_metrics, body_style);
 }
 
-/// Draw the battery percentage in the top-right corner (status bar).
-fn draw_battery<D>(target: &mut D, pct: u8)
-where
-    D: DrawTarget<Color = BinaryColor>,
-{
-    let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-    let mut buf: heapless::String<8> = heapless::String::new();
-    let _ = write!(buf, "{pct}%");
-    // FONT_6X10 → 6 px/char; right-align within the 800 px width with a margin.
-    let x = pins::X4_WIDTH as i32 - 16 - (buf.len() as i32) * 6;
-    let _ = Text::with_baseline(&buf, Point::new(x, 8), style, Baseline::Top).draw(target);
-}
-
-/// Render the reader: title strip, the current page's wrapped lines, and a
+/// Render the reader: status bar, the current page's wrapped lines, and a
 /// `page X/Y` footer.
-fn draw_reader<D>(target: &mut D, reader: &Reader)
+fn draw_reader<D>(target: &mut D, reader: &Reader, pct: u8)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     let _ = target.clear(BinaryColor::Off); // white
+    draw_status_bar(target, "Reading", pct);
 
-    let title_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-
-    let _ = Text::with_baseline(
-        "CrossPoint Reader",
-        Point::new(16, 6),
-        title_style,
-        Baseline::Top,
-    )
-    .draw(target);
-
     let lines = reader.page_lines();
     let _ = ui::render_lines(target, &lines, reader.metrics(), body_style);
 

@@ -115,6 +115,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | `embedded-graphics` `DrawTarget` | ✅ |
 | Front-button ADC decode + debounce | ✅ thresholds from `InputManager.cpp` |
 | Battery % curve + status-bar read (GPIO0, calibrated) | ✅ from `BatteryMonitor.cpp` (host-tested) |
+| Aurora-style status bar (title + battery + divider) | ✅ from `AuroraTheme::drawHeaderBar` |
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
