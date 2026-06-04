@@ -5,11 +5,13 @@
 //! fixed buffer, parse in place" model.
 
 pub mod font;
+pub mod html;
 pub mod text;
 
 // Re-export the public parser surface. Not yet consumed by the superloop, but
 // forms the module's API as the reader is ported.
 #[allow(unused_imports)]
 pub use font::{FontHeader, GlyphMetrics};
+pub use html::extract_text_inplace;
 #[allow(unused_imports)]
 pub use text::{Paragraph, TextReader};

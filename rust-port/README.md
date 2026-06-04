@@ -122,16 +122,19 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Menu widget (owned strings) + 3-screen navigation | ✅ (host-tested) |
 | Shared SPI2 bus (display + SD via SpiDevice/RefCellDevice) | ✅ |
 | File browser lists the SD root + opens the selected file | ✅ from `SDCardManager.cpp` (needs on-HW speed check) |
+| HTML/XHTML → text extraction (in-place, EPUB chapter core) | ✅ (host-tested) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
-| EPUB/HTML parsing, SD/FAT, fonts on disk, file browser, Wi-Fi, settings | ⛔ roadmap |
+| EPUB ZIP container (the XHTML extraction itself works), Wi-Fi, settings | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
 1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
    scrolling the browser past a screenful of files (paged list).
 2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
    variable-width `advance` so wrapping matches proportional fonts).
-3. Persist the last-read position per book.
+3. EPUB ZIP container: inflate + spine ordering, then feed each chapter through
+   the existing `parser::html::extract_text_inplace` (which already works).
+4. Persist the last-read position per book.
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Port the Aurora home layout (featured card + tab bar).
 6. X3 variant (UC81xx) display path.

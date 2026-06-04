@@ -189,7 +189,12 @@ pub fn run(p: Peripherals) -> ! {
                             drop(reader.take());
                             let dev =
                                 RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
-                            let n = crate::sd::load_named(dev, delay, name, book_buf);
+                            let mut n = crate::sd::load_named(dev, delay, name, book_buf);
+                            // HTML/XHTML (incl. EPUB chapters) → strip to plain
+                            // text in place before paginating.
+                            if is_html(name) {
+                                n = crosspoint_core::parser::extract_text_inplace(book_buf, n);
+                            }
                             let text: &[u8] = if n > 0 { &book_buf[..n] } else { SAMPLE_TEXT };
                             esp_println::println!("crosspoint-rs: open '{}' -> {} bytes", name, n);
                             reader = Some(Reader::new(text, reader_metrics, adv6));
@@ -260,6 +265,14 @@ const SAMPLE_NAME: &str = "sample.txt";
 /// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
 fn adv6(_c: char) -> u16 {
     6
+}
+
+/// True if the filename looks like HTML/XHTML (case-insensitive extension).
+fn is_html(name: &str) -> bool {
+    let lower = name.rsplit('.').next().unwrap_or("");
+    lower.eq_ignore_ascii_case("html")
+        || lower.eq_ignore_ascii_case("htm")
+        || lower.eq_ignore_ascii_case("xhtml")
 }
 
 /// Dispatch a render to whichever screen is active.
