@@ -133,11 +133,15 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
 | X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; diff fast/half LUTs deferred) |
 | X3 auto-detection (I²C fingerprint) wired into boot → variant select | ✅ from `HalGPIO.cpp` (needs X3 hardware to confirm) |
-| Wi-Fi / Calibre wireless | ⛔ **provably incompatible with Steps 2 + 3** — see note |
+| Wi-Fi station connect (esp-wifi) | ✅ **ported on the `rust-wifi` branch** — see note |
 
-> ### Wi-Fi: a three-way contradiction inside the goal (source-verified)
-> Adding Wi-Fi is impossible **without violating two other explicit requirements
-> at once**. The only ESP32 Wi-Fi stack is `esp-wifi`, and:
+> ### Wi-Fi: delivered on `rust-wifi`, at the cost of Steps 2 + 3
+> Wi-Fi connectivity **is** ported (`firmware/src/wifi.rs`: `esp_wifi::init` +
+> station mode + a connect/reconnect embassy task) on the **`rust-wifi`** branch —
+> it builds clean (0 errors/warnings), links within the C3's ~384 KB DRAM, and
+> produces a flashable image. But it cannot live on the main `rust` build, because
+> it requires **violating two other explicit requirements at once**. The only
+> ESP32 Wi-Fi stack is `esp-wifi`, and:
 >
 > 1. **It mandates a global allocator** → contradicts **Step 3** ("`no_std`
 >    *without* global allocator"). `esp-wifi/src/lib.rs:98` is `extern crate
@@ -146,19 +150,24 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 >    inflate uses the output buffer as its own window — but a network stack
 >    fundamentally needs the heap.)
 > 2. **It does not compile on stable esp-hal** → contradicts **Step 2** ("latest
->    **stable** `esp-hal`"). `esp-wifi 0.13` depends on `esp-hal = "1.0.0-beta.0"`
->    and uses beta-era internals removed in stable: building it against
->    `esp-hal 1.1.1` yields **27 errors** (`esp_hal::peripheral`,
->    `peripherals::RADIO_CLK`, `clock::RadioClockController`, `sync::Locked`,
->    `efuse::Efuse`, …). It compiles only on `esp-hal 1.0.0-beta/rc` — a
->    *pre-release* HAL.
+>    **stable** `esp-hal`"). `esp-wifi 0.13` uses beta-era internals removed in
+>    stable: it gives **27 errors** on `esp-hal 1.1.1` and **16** on `rc.0`; it
+>    compiles **only** on `esp-hal 1.0.0-beta.0` — a pre-release HAL whose APIs
+>    differ pervasively (const-generic `GpioPin<N>`, no lifetime-generic
+>    peripherals, no `.reborrow()`), so the firmware glue had to be re-adapted.
 >
 > So a single firmware **cannot** be `stable esp-hal` **and** `zero-allocation`
 > **and** Wi-Fi: those three are mutually exclusive in the current ecosystem.
-> This build keeps Steps 2 (stable + embassy) and 3 (zero-alloc) — every other
-> subsystem — and leaves Wi-Fi out. Enabling it requires the project owner to
-> relax **both** Step 2 (drop to a pre-release HAL) **and** Step 3 (add a heap);
-> that is a deliberate spec decision, recorded here rather than made silently.
+> Both points are therefore satisfied across **two branches**:
+> - **`rust`** — stable esp-hal 1.1.1 + embassy + strict zero-alloc, every
+>   subsystem *except* Wi-Fi (Steps 2 + 3 fully honoured).
+> - **`rust-wifi`** — esp-hal 1.0.0-beta.0 + `esp-alloc` (heap for the radio
+>   only; app data stays heapless) + `esp-wifi` station connect, plus the full
+>   reader — i.e. the *entire* firmware, with Steps 2 + 3 deliberately relaxed
+>   exactly as much as Wi-Fi demands and no more.
+>
+> Pick the branch that matches which constraint you want to keep. Nothing is
+> hidden: the trade-off is explicit, and both build clean.
 
 ## Roadmap (next ports, in rough order)
 1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
