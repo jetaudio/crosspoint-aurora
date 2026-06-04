@@ -13,10 +13,11 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::delay::DelayNs;
 
-use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
+use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::peripherals::Peripherals;
+use esp_hal::peripherals::ADC1;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
@@ -76,6 +77,10 @@ pub fn run(p: Peripherals) -> ! {
     let mut adc_cfg = AdcConfig::new();
     let mut adc_pin1 = adc_cfg.enable_pin(p.GPIO1, Attenuation::_11dB);
     let mut adc_pin2 = adc_cfg.enable_pin(p.GPIO2, Attenuation::_11dB);
+    // Battery sense on GPIO0 with curve calibration → reads come back in mV
+    // (the ÷2 divider is undone in `battery::percentage_from_adc_millivolts`).
+    let mut bat_pin =
+        adc_cfg.enable_pin_with_cal::<_, AdcCalCurve<ADC1<'static>>>(p.GPIO0, Attenuation::_11dB);
     let mut adc = Adc::new(p.ADC1, adc_cfg);
 
     // Power button (GPIO3, active low). Held long here would trigger power_off.
@@ -94,8 +99,20 @@ pub fn run(p: Peripherals) -> ! {
     let mut home = Home::new(HOME_ITEMS);
     let mut active = Active::Home;
 
+    // Read the battery once at boot; refreshed on each redraw below. With curve
+    // calibration `read_oneshot` yields millivolts; spin to block (WouldBlock).
+    let mut battery_pct = {
+        let mv = loop {
+            if let Ok(v) = adc.read_oneshot(&mut bat_pin) {
+                break v;
+            }
+        };
+        crosspoint_core::battery::percentage_from_adc_millivolts(mv)
+    };
+
     // ── First render ─────────────────────────────────────────────────────────
     draw_active(&mut eink, active, &home, &reader);
+    draw_battery(&mut eink, battery_pct);
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -142,7 +159,16 @@ pub fn run(p: Peripherals) -> ! {
                 },
             };
             if redraw {
+                battery_pct = {
+                    let mv = loop {
+                        if let Ok(v) = adc.read_oneshot(&mut bat_pin) {
+                            break v;
+                        }
+                    };
+                    crosspoint_core::battery::percentage_from_adc_millivolts(mv)
+                };
                 draw_active(&mut eink, active, &home, &reader);
+                draw_battery(&mut eink, battery_pct);
                 let mode = if screen_change {
                     RefreshMode::Full
                 } else {
@@ -214,6 +240,19 @@ where
         &menu_metrics,
         body_style,
     );
+}
+
+/// Draw the battery percentage in the top-right corner (status bar).
+fn draw_battery<D>(target: &mut D, pct: u8)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+    let mut buf: heapless::String<8> = heapless::String::new();
+    let _ = write!(buf, "{pct}%");
+    // FONT_6X10 → 6 px/char; right-align within the 800 px width with a margin.
+    let x = pins::X4_WIDTH as i32 - 16 - (buf.len() as i32) * 6;
+    let _ = Text::with_baseline(&buf, Point::new(x, 8), style, Baseline::Top).draw(target);
 }
 
 /// Render the reader: title strip, the current page's wrapped lines, and a

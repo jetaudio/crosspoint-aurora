@@ -114,6 +114,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | SSD1677 (X4) init / RAM area / refresh / deep-sleep | ✅ 1-to-1 from `EInkDisplay.cpp` |
 | `embedded-graphics` `DrawTarget` | ✅ |
 | Front-button ADC decode + debounce | ✅ thresholds from `InputManager.cpp` |
+| Battery % curve + status-bar read (GPIO0, calibrated) | ✅ from `BatteryMonitor.cpp` (host-tested) |
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
@@ -128,6 +129,6 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
    variable-width `advance` so wrapping matches proportional fonts).
 3. File browser screen: list real book files from the SD card, open into Reader.
-4. Battery ADC read (GPIO0) + status bar; deep-sleep wake path.
+4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Port the Aurora home layout (featured card + tab bar).
 6. X3 variant (UC81xx) display path.

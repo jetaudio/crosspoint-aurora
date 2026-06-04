@@ -11,6 +11,7 @@
 #[cfg(test)]
 extern crate std;
 
+pub mod battery;
 pub mod driver;
 pub mod input;
 pub mod layout;
