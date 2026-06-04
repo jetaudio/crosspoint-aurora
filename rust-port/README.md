@@ -18,28 +18,23 @@ map so it is safe to flash on real hardware.
 
 ## Architecture decisions
 
-### Async embassy executor — and the esp-hal version trade-off
-The firmware runs on the **embassy** async executor (`#[esp_hal_embassy::main]`),
-with the app loop as one async task and `embassy_time::Timer::after` between input
-polls (Step 2 of the goal asks for `embassy-executor` + `embassy-time`).
+### Async embassy on **stable** esp-hal (both Step-2 requirements, no trade-off)
+The firmware runs on the **embassy** async executor (`embassy-executor`'s
+thread-mode riscv executor) on **stable `esp-hal 1.1.1`** — satisfying *both* of
+Step 2's asks at once: "latest stable esp-hal" **and** `embassy-executor` +
+`embassy-time`. The app loop is one async task; `embassy_time::Timer::after`
+spaces the input polls.
 
-This forces an esp-hal **version trade-off baked into the goal itself**. Step 2
-asks for *both* "latest **stable** esp-hal" *and* embassy — but they are mutually
-exclusive: `esp-hal-embassy` (the crate that supplies embassy's time driver +
-executor integration) gates on the private `esp-hal/__esp_hal_embassy` feature,
-which **exists only up to `esp-hal 1.0.0-rc.0`** and was removed in every stable
-release (`1.0.0` … `1.1.1`). So:
+The usual integration crate, `esp-hal-embassy`, only pairs with *pre-release*
+esp-hal (it gates on the private `esp-hal/__esp_hal_embassy` feature, removed
+after `1.0.0-rc.0`). So instead of dropping to a pre-release HAL, we supply our
+**own `embassy-time` driver** (`firmware/src/time_driver.rs`): a 1 ms periodic
+`SystemTimer` alarm advances a millisecond counter and wakes expired timers via
+`embassy-time-queue-utils` (`TICK_HZ = 1000`). That keeps the whole project on
+stable esp-hal with full async support — no version compromise.
 
-- **Embassy build (this branch):** `esp-hal 1.0.0-rc.0` + `esp-hal-embassy 0.9.0`
-  — satisfies the async requirement, at the cost of a *pre-release* HAL.
-- A **stable** variant (`esp-hal 1.1.1` + a blocking superloop) is preserved in
-  this repo's git history; it satisfies "latest stable esp-hal" but cannot use
-  embassy. An e-reader is naturally a low-frequency blocking UI (the C++ firmware
-  is itself a blocking `Activity::update/render` loop), so both are sound; embassy
-  is chosen here because the goal lists it explicitly.
-
-The portable `core` crate is esp-hal-independent, so it is **unchanged** between
-the two — only the firmware entry point and the poll delay differ.
+The portable `core` crate is esp-hal-independent, so the reader/parser/driver
+logic is identical regardless of executor.
 
 ### Workspace split: `core` (testable) + `firmware` (hardware)
 ```

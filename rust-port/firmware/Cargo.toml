@@ -12,19 +12,26 @@ path = "src/main.rs"
 [dependencies]
 crosspoint-core = { path = "../core" }
 
-# Core HAL — esp-hal 1.0.0-rc.0 + esp-hal-embassy, the pairing required for the
-# async embassy executor + time driver (esp-hal-embassy gates on the private
-# `__esp_hal_embassy` feature that exists only up to esp-hal 1.0.0-rc.0). This is
-# the documented trade-off: Step 2 of the goal asks for BOTH "latest stable
-# esp-hal" AND embassy, which are mutually exclusive — embassy wins here.
-esp-hal = { version = "=1.0.0-rc.0", features = ["esp32c3", "unstable"] }
-esp-hal-embassy = { version = "=0.9.0", features = ["esp32c3"] }
-# esp-hal-embassy provides the executor + pender; don't enable embassy-executor's
-# own arch/executor features (they'd define a second `__pender`).
-embassy-executor = "0.7"
-embassy-time = "0.4"
-esp-backtrace = { version = "=0.15.0", features = ["esp32c3", "panic-handler", "println"] }
-esp-println = { version = "=0.13.0", features = ["esp32c3"] }
+# Core HAL — esp-hal 1.x STABLE, with embassy on top via OUR OWN time driver
+# (`src/time_driver.rs`, backed by a 1 ms SystemTimer tick) instead of
+# `esp-hal-embassy` (which only pairs with pre-release esp-hal). This satisfies
+# BOTH Step-2 requirements at once: latest stable esp-hal AND embassy.
+esp-hal = { version = "=1.1.1", features = ["esp32c3", "unstable"] }
+esp-bootloader-esp-idf = { version = "=0.2.0", features = ["esp32c3"] }
+esp-backtrace = { version = "=0.17.0", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "=0.15.0", features = ["esp32c3", "log-04"] }
+
+# embassy: the thread-mode riscv executor + our custom time driver.
+embassy-executor = { version = "0.7", features = [
+    "arch-riscv32",
+    "executor-thread",
+    "task-arena-size-65536",
+] }
+embassy-time = { version = "0.4", features = ["tick-hz-1_000"] }
+embassy-time-driver = "0.2"
+embassy-time-queue-utils = "0.1"
+critical-section = "1"
+static_cell = "2"
 
 embedded-graphics = "0.8"
 embedded-hal = "1.0"

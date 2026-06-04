@@ -52,9 +52,8 @@ static mut EPUB_BUF: [u8; EPUB_BUF_SIZE] = [0; EPUB_BUF_SIZE];
 
 /// Bring up the board and run the async app loop forever.
 pub async fn run(mut p: Peripherals) -> ! {
-    // Initialise the embassy time driver from the system timer.
-    let systimer = esp_hal::timer::systimer::SystemTimer::new(p.SYSTIMER);
-    esp_hal_embassy::init(systimer.alarm0);
+    // Start our embassy-time driver (1 ms SystemTimer tick) before any await.
+    crate::time_driver::init(p.SYSTIMER);
 
     let delay = Delay::new();
 
