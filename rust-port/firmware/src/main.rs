@@ -12,6 +12,7 @@ use esp_backtrace as _;
 
 mod app;
 mod power;
+mod sd;
 
 // esp-hal 1.x stable boots through the ESP-IDF 2nd-stage bootloader, which needs
 // an application descriptor embedded in the image.

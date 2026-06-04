@@ -36,6 +36,11 @@ use crosspoint_core::ui::{self, Event, Menu, Reader};
 /// the first draw, and every render clears it first.
 static mut FRAMEBUFFER: [u8; pins::X4_BUFFER_SIZE] = [0; pins::X4_BUFFER_SIZE];
 
+/// Buffer a book file is read into from the SD card (32 KB → ~paginates a short
+/// book/chapter). Lives in `.bss`. Falls back to the bundled sample if empty.
+const BOOK_BUF_SIZE: usize = 32 * 1024;
+static mut BOOK_BUF: [u8; BOOK_BUF_SIZE] = [0; BOOK_BUF_SIZE];
+
 /// Bring up the board and run the superloop forever.
 pub fn run(p: Peripherals) -> ! {
     let delay = Delay::new();
@@ -64,7 +69,7 @@ pub fn run(p: Peripherals) -> ! {
     .with_miso(p.GPIO7);
     let spi_bus: RefCell<_> = RefCell::new(spi);
     let display_dev = RefCellDevice::new(&spi_bus, cs, delay).expect("display SPI device");
-    let _sd_dev = RefCellDevice::new(&spi_bus, sd_cs, delay).expect("SD SPI device");
+    let sd_dev = RefCellDevice::new(&spi_bus, sd_cs, delay).expect("SD SPI device");
 
     // ── E-ink driver (over its shared SPI device) ────────────────────────────
     let fb: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER) };
@@ -102,7 +107,20 @@ pub fn run(p: Peripherals) -> ! {
         margin_y: 34, // leaves a title strip at the top
         line_height: 14,
     };
-    let mut reader = Reader::new(SAMPLE_TEXT, reader_metrics, adv6);
+    // Try to read the first book file off the SD card; fall back to the bundled
+    // sample if there's no card / volume / file. Consuming `sd_dev` here releases
+    // its shared-bus borrow before the superloop (the display keeps its own).
+    let book_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(BOOK_BUF) };
+    let book_len = crate::sd::load_first_book(sd_dev, delay, book_buf);
+    let book_text: &[u8] = if book_len > 0 {
+        esp_println::println!("crosspoint-rs: loaded {} bytes from SD", book_len);
+        &book_buf[..book_len]
+    } else {
+        esp_println::println!("crosspoint-rs: no SD book, using bundled sample");
+        SAMPLE_TEXT
+    };
+
+    let mut reader = Reader::new(book_text, reader_metrics, adv6);
     let mut home = Menu::new(HOME_ITEMS);
     let mut browser = Menu::new(FILE_ITEMS);
     let mut active = Active::Home;
