@@ -15,7 +15,6 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
-use embedded_hal::delay::DelayNs;
 
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
 use esp_hal::delay::Delay;
@@ -51,8 +50,12 @@ static mut BOOK_BUF: [u8; BOOK_BUF_SIZE] = [0; BOOK_BUF_SIZE];
 const EPUB_BUF_SIZE: usize = 64 * 1024;
 static mut EPUB_BUF: [u8; EPUB_BUF_SIZE] = [0; EPUB_BUF_SIZE];
 
-/// Bring up the board and run the superloop forever.
-pub fn run(mut p: Peripherals) -> ! {
+/// Bring up the board and run the async app loop forever.
+pub async fn run(mut p: Peripherals) -> ! {
+    // Initialise the embassy time driver from the system timer.
+    let systimer = esp_hal::timer::systimer::SystemTimer::new(p.SYSTIMER);
+    esp_hal_embassy::init(systimer.alarm0);
+
     let delay = Delay::new();
 
     // ── Display control GPIOs (exact pins) ───────────────────────────────────
@@ -194,9 +197,8 @@ pub fn run(mut p: Peripherals) -> ! {
     );
     eink.display(RefreshMode::Full, false);
 
-    // ── Superloop ────────────────────────────────────────────────────────────
+    // ── Async app loop ───────────────────────────────────────────────────────
     let mut btn_state = ButtonState::new();
-    let mut delay_loop = delay;
     loop {
         // Poll both ADC ladders. On RISC-V the only blocking primitive is the
         // nb-style `read_oneshot`; its sole error is WouldBlock, so spin to block.
@@ -346,7 +348,8 @@ pub fn run(mut p: Peripherals) -> ! {
             crate::power::power_off(p.GPIO13, p.LPWR);
         }
 
-        delay_loop.delay_ms(40); // ~25 Hz input poll, matches a debounce window.
+        // ~25 Hz input poll (yields to the executor between iterations).
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(40)).await;
     }
 }
 

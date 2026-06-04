@@ -12,15 +12,19 @@ path = "src/main.rs"
 [dependencies]
 crosspoint-core = { path = "../core" }
 
-# Core HAL — esp-hal 1.x STABLE. (We deliberately do NOT use esp-hal-embassy:
-# its latest release 0.9.1 enables esp-hal/__esp_hal_embassy, a private feature
-# that exists only up to esp-hal 1.0.0-rc.0 — so embassy would force a
-# pre-release HAL. A blocking superloop matches the original C++ firmware's
-# Activity update/render model and fits the 384 KB RAM budget better. See README.)
-esp-hal = { version = "=1.1.1", features = ["esp32c3", "unstable"] }
-esp-bootloader-esp-idf = { version = "=0.2.0", features = ["esp32c3"] }
-esp-backtrace = { version = "=0.17.0", features = ["esp32c3", "panic-handler", "println"] }
-esp-println = { version = "=0.15.0", features = ["esp32c3", "log-04"] }
+# Core HAL — esp-hal 1.0.0-rc.0 + esp-hal-embassy, the pairing required for the
+# async embassy executor + time driver (esp-hal-embassy gates on the private
+# `__esp_hal_embassy` feature that exists only up to esp-hal 1.0.0-rc.0). This is
+# the documented trade-off: Step 2 of the goal asks for BOTH "latest stable
+# esp-hal" AND embassy, which are mutually exclusive — embassy wins here.
+esp-hal = { version = "=1.0.0-rc.0", features = ["esp32c3", "unstable"] }
+esp-hal-embassy = { version = "=0.9.0", features = ["esp32c3"] }
+# esp-hal-embassy provides the executor + pender; don't enable embassy-executor's
+# own arch/executor features (they'd define a second `__pender`).
+embassy-executor = "0.7"
+embassy-time = "0.4"
+esp-backtrace = { version = "=0.15.0", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "=0.13.0", features = ["esp32c3"] }
 
 embedded-graphics = "0.8"
 embedded-hal = "1.0"

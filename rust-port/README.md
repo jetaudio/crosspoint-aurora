@@ -18,23 +18,28 @@ map so it is safe to flash on real hardware.
 
 ## Architecture decisions
 
-### Blocking superloop, **not** async/embassy
-The goal brief suggested `embassy`. We deliberately **do not** use it:
+### Async embassy executor — and the esp-hal version trade-off
+The firmware runs on the **embassy** async executor (`#[esp_hal_embassy::main]`),
+with the app loop as one async task and `embassy_time::Timer::after` between input
+polls (Step 2 of the goal asks for `embassy-executor` + `embassy-time`).
 
-- The only published `esp-hal-embassy` (0.9.1) enables the private esp-hal
-  feature `__esp_hal_embassy`, which **exists only up to `esp-hal 1.0.0-rc.0`** —
-  it was removed in every stable release (`1.0.0` … `1.1.1`). So pulling embassy
-  forces the firmware onto a *pre-release* HAL. (Verified against the crates.io
-  index: `esp-hal-embassy 0.9.1 → esp-hal "^1.0.0-rc.0" + feature
-  "requires-unstable"`, and `executors → esp-hal/__esp_hal_embassy`, last present
-  in `esp-hal 1.0.0-rc.0`.)
-- An e-reader is intrinsically a low-frequency, blocking UI device: wait for a
-  button → lay out a page → push a slow (~hundreds of ms) e-ink refresh. The C++
-  firmware itself is a blocking `Activity::update/render` loop, not async.
-- A blocking design uses less RAM (no async executor arena), which matters on the
-  C3's ~384 KB.
+This forces an esp-hal **version trade-off baked into the goal itself**. Step 2
+asks for *both* "latest **stable** esp-hal" *and* embassy — but they are mutually
+exclusive: `esp-hal-embassy` (the crate that supplies embassy's time driver +
+executor integration) gates on the private `esp-hal/__esp_hal_embassy` feature,
+which **exists only up to `esp-hal 1.0.0-rc.0`** and was removed in every stable
+release (`1.0.0` … `1.1.1`). So:
 
-So we build on **`esp-hal 1.1.1` stable** with a blocking superloop.
+- **Embassy build (this branch):** `esp-hal 1.0.0-rc.0` + `esp-hal-embassy 0.9.0`
+  — satisfies the async requirement, at the cost of a *pre-release* HAL.
+- A **stable** variant (`esp-hal 1.1.1` + a blocking superloop) is preserved in
+  this repo's git history; it satisfies "latest stable esp-hal" but cannot use
+  embassy. An e-reader is naturally a low-frequency blocking UI (the C++ firmware
+  is itself a blocking `Activity::update/render` loop), so both are sound; embassy
+  is chosen here because the goal lists it explicitly.
+
+The portable `core` crate is esp-hal-independent, so it is **unchanged** between
+the two — only the firmware entry point and the poll delay differ.
 
 ### Workspace split: `core` (testable) + `firmware` (hardware)
 ```
@@ -48,8 +53,8 @@ rust-port/
 │       └── input.rs       # ADC button decode + edge debounce
 └── firmware/    # the esp32-c3 binary
     └── src/
-        ├── main.rs   # esp_hal::init + app::run
-        ├── app.rs    # board bring-up (SPI/GPIO/ADC on exact pins) + superloop
+        ├── main.rs   # #[esp_hal_embassy::main] async entry
+        ├── app.rs    # board bring-up (SPI/GPIO/ADC on exact pins) + async app loop
         └── power.rs  # battery-latch (GPIO13) shutdown
 ```
 Keeping the driver generic over `embedded-hal` traits means the whole `core`
