@@ -13,7 +13,7 @@ use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::{Line, PrimitiveStyle};
+use embedded_graphics::primitives::{Line, PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::delay::DelayNs;
 
@@ -30,7 +30,7 @@ use crosspoint_core::driver::{Eink, RefreshMode};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
 use crosspoint_core::layout::PageMetrics;
 use crosspoint_core::pins;
-use crosspoint_core::ui::{self, Event, Menu, Reader};
+use crosspoint_core::ui::{self, AuroraHome, Event, HomeAction, Menu, Reader, Zone, TAB_LABELS};
 
 /// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
 /// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
@@ -117,22 +117,22 @@ pub fn run(p: Peripherals) -> ! {
     };
     let book_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(BOOK_BUF) };
     let epub_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(EPUB_BUF) };
-    let mut home = Menu::from_items(HOME_ITEMS);
-    let mut browser = Menu::new();
-    // The reader is created when a file is opened from the browser.
-    let mut reader: Option<Reader> = None;
-    let mut active = Active::Home;
 
-    // List the SD root into the browser. If there's no card / no files, fall back
-    // to a single sample entry so the demo still works without an SD card.
+    // Build the Aurora home library list from the SD root. If there's no card /
+    // no files, fall back to a single sample entry so the demo still works.
+    let mut library = Menu::new();
     {
         let dev = RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
-        let n = crate::sd::list_files(dev, delay, &mut browser);
+        let n = crate::sd::list_files(dev, delay, &mut library);
         esp_println::println!("crosspoint-rs: {} files on SD", n);
         if n == 0 {
-            let _ = browser.push(SAMPLE_NAME);
+            let _ = library.push(SAMPLE_NAME);
         }
     }
+    let mut home = AuroraHome::new(library);
+    // The reader is created when a book is opened from the home library.
+    let mut reader: Option<Reader> = None;
+    let mut active = Active::Home;
 
     // Read the battery once at boot; refreshed on each redraw below. With curve
     // calibration `read_oneshot` yields millivolts; spin to block (WouldBlock).
@@ -146,14 +146,7 @@ pub fn run(p: Peripherals) -> ! {
     };
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_active(
-        &mut eink,
-        active,
-        &home,
-        &browser,
-        reader.as_ref(),
-        battery_pct,
-    );
+    draw_active(&mut eink, active, &home, reader.as_ref(), battery_pct);
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -179,70 +172,71 @@ pub fn run(p: Peripherals) -> ! {
             // Returns whether to redraw, and whether it was a screen change
             // (which warrants a stronger full refresh).
             let (redraw, screen_change) = match active {
+                // Aurora two-zone nav: side Up/Down browse the library, front
+                // Left/Right move the tab bar, Select acts on the active zone.
                 Active::Home => match event {
                     Some(Event::Up) => (home.up(), false),
                     Some(Event::Down) => (home.down(), false),
-                    // Item 0 ("Open book") opens the file browser; else no-op.
-                    Some(Event::Select) if home.selected() == 0 => {
-                        active = Active::Browser;
-                        (true, true)
-                    }
-                    _ => (false, false),
-                },
-                Active::Browser => match event {
-                    Some(Event::Up) => (browser.up(), false),
-                    Some(Event::Down) => (browser.down(), false),
-                    // Open the selected file: drop any current reader (releasing
-                    // its book_buf borrow), read the file into book_buf, then make
-                    // a fresh reader over it. Falls back to the bundled sample if
-                    // the read returns nothing.
-                    Some(Event::Select) => {
-                        if let Some(name) = browser.selected_item() {
-                            // Drop any current reader first so its borrow of
-                            // book_buf ends before we read into book_buf again.
-                            drop(reader.take());
-                            let dev =
-                                RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
-                            let mut n;
-                            if is_epub(name) {
-                                // EPUB: read the ZIP into epub_buf, extract the
-                                // first XHTML chapter into book_buf, then strip
-                                // tags to plain text.
-                                let raw = crate::sd::load_named(dev, delay, name, epub_buf);
-                                n = match crosspoint_core::archive::extract_first_html(
-                                    &epub_buf[..raw],
-                                    book_buf,
-                                ) {
-                                    Ok(html_len) => crosspoint_core::parser::extract_text_inplace(
-                                        book_buf, html_len,
-                                    ),
-                                    Err(_) => 0,
-                                };
-                            } else {
-                                n = crate::sd::load_named(dev, delay, name, book_buf);
-                                // HTML/XHTML → strip to plain text in place.
-                                if is_html(name) {
-                                    n = crosspoint_core::parser::extract_text_inplace(book_buf, n);
+                    Some(Event::PrevPage) => (home.left(), false), // front Left
+                    Some(Event::NextPage) => (home.right(), false), // front Right
+                    Some(Event::Select) => match home.select() {
+                        HomeAction::OpenContent(i) => {
+                            if let Some(name) = home.content().item(i) {
+                                // Drop any current reader so its borrow of book_buf
+                                // ends before we read into book_buf again.
+                                drop(reader.take());
+                                let dev = RefCellDevice::new(&spi_bus, &mut sd_cs, delay)
+                                    .expect("SD device");
+                                let mut n;
+                                if is_epub(name) {
+                                    // EPUB: ZIP into epub_buf → inflate first XHTML
+                                    // chapter into book_buf → strip tags to text.
+                                    let raw = crate::sd::load_named(dev, delay, name, epub_buf);
+                                    n = match crosspoint_core::archive::extract_first_html(
+                                        &epub_buf[..raw],
+                                        book_buf,
+                                    ) {
+                                        Ok(hl) => crosspoint_core::parser::extract_text_inplace(
+                                            book_buf, hl,
+                                        ),
+                                        Err(_) => 0,
+                                    };
+                                } else {
+                                    n = crate::sd::load_named(dev, delay, name, book_buf);
+                                    if is_html(name) {
+                                        n = crosspoint_core::parser::extract_text_inplace(
+                                            book_buf, n,
+                                        );
+                                    }
                                 }
+                                let text: &[u8] = if n > 0 { &book_buf[..n] } else { SAMPLE_TEXT };
+                                esp_println::println!(
+                                    "crosspoint-rs: open '{}' -> {} bytes",
+                                    name,
+                                    n
+                                );
+                                reader = Some(Reader::new(text, reader_metrics, adv6));
+                                active = Active::Reader;
+                                (true, true)
+                            } else {
+                                (false, false)
                             }
-                            let text: &[u8] = if n > 0 { &book_buf[..n] } else { SAMPLE_TEXT };
-                            esp_println::println!("crosspoint-rs: open '{}' -> {} bytes", name, n);
-                            reader = Some(Reader::new(text, reader_metrics, adv6));
                         }
-                        active = Active::Reader;
-                        (true, true)
-                    }
-                    Some(Event::Back) => {
-                        active = Active::Home;
-                        (true, true)
-                    }
+                        HomeAction::OpenTab(t) => {
+                            // Browse/Recent focus the library; Settings/Transfer
+                            // are not yet ported (logged, redraw to show focus).
+                            esp_println::println!("crosspoint-rs: tab {}", TAB_LABELS[t]);
+                            (true, false)
+                        }
+                        HomeAction::None => (false, false),
+                    },
                     _ => (false, false),
                 },
                 Active::Reader => match (event, reader.as_mut()) {
                     (Some(Event::NextPage), Some(r)) => (r.next_page(), false),
                     (Some(Event::PrevPage), Some(r)) => (r.prev_page(), false),
                     (Some(Event::Back), _) => {
-                        active = Active::Browser;
+                        active = Active::Home;
                         (true, true)
                     }
                     _ => (false, false),
@@ -257,14 +251,7 @@ pub fn run(p: Peripherals) -> ! {
                     };
                     crosspoint_core::battery::percentage_from_adc_millivolts(mv)
                 };
-                draw_active(
-                    &mut eink,
-                    active,
-                    &home,
-                    &browser,
-                    reader.as_ref(),
-                    battery_pct,
-                );
+                draw_active(&mut eink, active, &home, reader.as_ref(), battery_pct);
                 let mode = if screen_change {
                     RefreshMode::Full
                 } else {
@@ -288,14 +275,10 @@ pub fn run(p: Peripherals) -> ! {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Active {
     Home,
-    Browser,
     Reader,
 }
 
-/// Home menu entries.
-const HOME_ITEMS: &[&str] = &["Open book", "About"];
-
-/// Browser entry shown when no SD card / files are present; opens the sample.
+/// Library entry shown when no SD card / files are present; opens the sample.
 const SAMPLE_NAME: &str = "sample.txt";
 
 /// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
@@ -323,16 +306,14 @@ fn is_epub(name: &str) -> bool {
 fn draw_active<D>(
     target: &mut D,
     active: Active,
-    home: &Menu,
-    browser: &Menu,
+    home: &AuroraHome,
     reader: Option<&Reader>,
     pct: u8,
 ) where
     D: DrawTarget<Color = BinaryColor>,
 {
     match active {
-        Active::Home => draw_menu(target, "CrossPoint", home, pct),
-        Active::Browser => draw_menu(target, "Books", browser, pct),
+        Active::Home => draw_home(target, home, pct),
         Active::Reader => {
             if let Some(r) = reader {
                 draw_reader(target, r, pct);
@@ -367,23 +348,91 @@ where
     .draw(target);
 }
 
-/// Render a titled vertical menu (Home / Browser).
-fn draw_menu<D>(target: &mut D, title: &str, menu: &Menu, pct: u8)
+/// Render the Aurora home: status bar + "Now Reading" featured card + library
+/// list + bottom tab bar. Ports the Aurora home redesign.
+fn draw_home<D>(target: &mut D, home: &AuroraHome, pct: u8)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     let _ = target.clear(BinaryColor::Off); // white
-    draw_status_bar(target, title, pct);
+    draw_status_bar(target, "Library", pct);
 
     let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
-    let menu_metrics = PageMetrics {
+    let w = pins::X4_WIDTH as i32;
+
+    // Featured "Now Reading" card (bordered) — shows the highlighted item.
+    let _ = Rectangle::new(Point::new(16, 36), Size::new((w - 32) as u32, 52))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(target);
+    let _ = Text::with_baseline("Now Reading", Point::new(24, 42), body_style, Baseline::Top)
+        .draw(target);
+    let _ = Text::with_baseline(
+        home.featured().unwrap_or("—"),
+        Point::new(24, 62),
+        body_style,
+        Baseline::Top,
+    )
+    .draw(target);
+
+    // Library list (the content zone).
+    let list_metrics = PageMetrics {
         width: pins::X4_WIDTH,
         height: pins::X4_HEIGHT,
         margin_x: 24,
-        margin_y: 60,
-        line_height: 16,
+        margin_y: 104,
+        line_height: 14,
     };
-    let _ = ui::render_menu(target, menu, &menu_metrics, body_style);
+    let _ = ui::render_menu(target, home.content(), &list_metrics, body_style);
+
+    draw_tab_bar(target, home);
+}
+
+/// Bottom icon tab bar: four evenly-spaced labels. The current tab is boxed; if
+/// the tab bar is the active zone it is filled (inverted).
+fn draw_tab_bar<D>(target: &mut D, home: &AuroraHome)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let w = pins::X4_WIDTH as i32;
+    let h = pins::X4_HEIGHT as i32;
+    let bar_top = h - 36;
+    let cell = w / TAB_LABELS.len() as i32;
+    let tab_active_zone = home.zone() == Zone::TabBar;
+
+    // Divider above the bar.
+    let _ = Line::new(Point::new(0, bar_top - 4), Point::new(w, bar_top - 4))
+        .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+        .draw(target);
+
+    for (i, label) in TAB_LABELS.iter().enumerate() {
+        let x0 = i as i32 * cell;
+        let selected = i == home.tab();
+        let rect = Rectangle::new(
+            Point::new(x0 + 6, bar_top),
+            Size::new((cell - 12) as u32, 30),
+        );
+        // Highlight the selected tab; invert it when the tab bar has focus.
+        let (text_color, fill) = if selected && tab_active_zone {
+            let _ = rect
+                .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+                .draw(target);
+            (BinaryColor::Off, true)
+        } else if selected {
+            let _ = rect
+                .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+                .draw(target);
+            (BinaryColor::On, true)
+        } else {
+            (BinaryColor::On, false)
+        };
+        let _ = fill; // (kept for clarity)
+
+        let style = MonoTextStyle::new(&FONT_6X10, text_color);
+        // Centre the label within the cell (6 px/char).
+        let tx = x0 + (cell - label.len() as i32 * 6) / 2;
+        let _ = Text::with_baseline(label, Point::new(tx, bar_top + 10), style, Baseline::Top)
+            .draw(target);
+    }
 }
 
 /// Render the reader: status bar, the current page's wrapped lines, and a

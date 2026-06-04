@@ -3,9 +3,11 @@
 //! Mirrors the C++ firmware's screen model at a small scale — logical `Event`s
 //! decoded from physical buttons, driving a screen (currently the `Reader`).
 
+pub mod aurora_home;
 pub mod menu;
 pub mod reader;
 
+pub use aurora_home::{AuroraHome, HomeAction, Zone, TAB_LABELS};
 pub use menu::Menu;
 pub use reader::Reader;
 
