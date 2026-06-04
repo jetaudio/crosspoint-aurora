@@ -131,7 +131,18 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
 | X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; needs X3 hardware to validate; diff fast/half LUTs deferred) |
-| Wi-Fi / Calibre wireless, settings UI | ⛔ roadmap |
+| Wi-Fi / Calibre wireless | ⛔ **blocked by a constraint conflict** — see note |
+
+> **Wi-Fi vs. the zero-allocation rule.** The only ESP32 Wi-Fi stack, `esp-wifi`
+> (0.13, the version compatible with esp-hal 1.1.1), **requires a global
+> allocator**: `src/lib.rs:98` is `extern crate alloc;` and its Wi-Fi/BLE/esp-now
+> layers use `Box`/`Vec`/`VecDeque` (the `esp-alloc` feature wires the heap).
+> That is mutually exclusive with this project's hard "`no_std` **without** global
+> allocator" memory policy. EPUB was made genuinely zero-allocation (inflate uses
+> the output buffer as its own window); Wi-Fi cannot be, because the dependency
+> mandates the heap. Honouring the zero-alloc rule, Wi-Fi is intentionally not
+> added. Adding it would mean introducing a global allocator and relaxing that
+> policy — a deliberate decision for the project owner, not a silent change.
 
 ## Roadmap (next ports, in rough order)
 1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
