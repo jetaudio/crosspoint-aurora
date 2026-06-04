@@ -2,4 +2,4 @@
 
 pub mod eink;
 
-pub use eink::{Eink, RefreshMode};
+pub use eink::{Eink, RefreshMode, Variant};

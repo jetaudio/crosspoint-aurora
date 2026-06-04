@@ -45,6 +45,61 @@ const CTRL1_NORMAL: u8 = 0x00; // compare RED vs BW (fast/partial)
 const CTRL1_BYPASS_RED: u8 = 0x40; // bypass RED (full refresh)
 const TEMP_SENSOR_INTERNAL: u8 = 0x80;
 
+// ── X3 (UC81xx) command set (from EInkDisplay.cpp:41-65) ─────────────────────
+const X3_PANEL_SETTING: u8 = 0x00;
+const X3_POWER_SETTING: u8 = 0x01;
+const X3_POWER_OFF: u8 = 0x02;
+const X3_POWER_ON: u8 = 0x04;
+const X3_BOOSTER_SOFT_START: u8 = 0x06;
+const X3_DTM1: u8 = 0x10; // "old" RAM plane
+const X3_DATA_STOP: u8 = 0x11; // commit a DTMx stream
+const X3_DISPLAY_REFRESH: u8 = 0x12; // DRF
+const X3_DTM2: u8 = 0x13; // "new" RAM plane
+const X3_LUT_VCOM: u8 = 0x20;
+const X3_PLL_CONTROL: u8 = 0x30;
+const X3_VCOM_DATA_INTERVAL: u8 = 0x50; // CDI / mode select
+const X3_RESOLUTION: u8 = 0x61;
+const X3_GATE_SOURCE_START: u8 = 0x65;
+const X3_VCOM_DC: u8 = 0x82;
+const X3_LV_SELECTION: u8 = 0xE1;
+
+/// X3 OEM "full/quality" image-write LUT bank (EInkDisplay.cpp:286-310). Each
+/// array is 43 bytes; the controller consumes the first 42. CDI 0x29,0x07 is set
+/// before loading this bank.
+const X3_LUT_VCOM_FULL: [u8; 43] = [
+    0x00, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+const X3_LUT_WW_FULL: [u8; 43] = [
+    0x4A, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+const X3_LUT_BW_FULL: [u8; 43] = [
+    0x0A, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+const X3_LUT_WB_FULL: [u8; 43] = [
+    0x04, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x40, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+const X3_LUT_BB_FULL: [u8; 43] = [
+    0x84, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x40, 0x0A, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
+/// Display panel variant. The X4 (SSD1677) and X3 (UC81xx) speak different
+/// command sets, have different resolutions, and invert BUSY polarity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Variant {
+    X4,
+    X3,
+}
+
 /// Refresh waveform tier (matches the C++ `RefreshMode`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RefreshMode {
@@ -75,6 +130,7 @@ pub struct Eink<SPI, DC, RST, BUSY, DELAY> {
     fb: &'static mut [u8],
     width: u16,
     height: u16,
+    variant: Variant,
     screen_on: bool,
 }
 
@@ -86,7 +142,7 @@ where
     BUSY: InputPin,
     DELAY: DelayNs,
 {
-    /// Construct (does not touch the panel — call [`Eink::init`] next).
+    /// Construct an X4 (SSD1677) panel driver. Call [`Eink::init`] next.
     pub fn new(
         spi: SPI,
         dc: DC,
@@ -97,6 +153,22 @@ where
         width: u16,
         height: u16,
     ) -> Self {
+        Self::with_variant(spi, dc, rst, busy, delay, fb, width, height, Variant::X4)
+    }
+
+    /// Construct for a specific panel [`Variant`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_variant(
+        spi: SPI,
+        dc: DC,
+        rst: RST,
+        busy: BUSY,
+        delay: DELAY,
+        fb: &'static mut [u8],
+        width: u16,
+        height: u16,
+        variant: Variant,
+    ) -> Self {
         Self {
             spi,
             dc,
@@ -106,6 +178,7 @@ where
             fb,
             width,
             height,
+            variant,
             screen_on: false,
         }
     }
@@ -132,13 +205,36 @@ where
         let _ = self.spi.write(data);
     }
 
-    /// X4: BUSY is held HIGH while busy, drops LOW when done (EInkDisplay.cpp:550).
+    /// Wait for the controller. BUSY polarity is inverted between variants
+    /// (EInkDisplay.cpp:548-582):
+    /// - X4 (SSD1677): held HIGH while busy, drops LOW when done.
+    /// - X3 (UC81xx): active LOW — idle HIGH, working LOW; we wait for the
+    ///   HIGH→LOW→HIGH transition (with a short race window for the falling edge).
     fn wait_while_busy(&mut self) {
-        // Bounded poll (~30 s like the C++); each iteration is ~1 ms.
-        let mut guard: u32 = 30_000;
-        while self.busy.is_high().unwrap_or(false) && guard > 0 {
-            self.delay.delay_ms(1);
-            guard -= 1;
+        match self.variant {
+            Variant::X4 => {
+                let mut guard: u32 = 30_000;
+                while self.busy.is_high().unwrap_or(false) && guard > 0 {
+                    self.delay.delay_ms(1);
+                    guard -= 1;
+                }
+            }
+            Variant::X3 => {
+                // Wait up to ~1 s for the HIGH→LOW edge (controller may not
+                // assert BUSY immediately), then up to ~30 s for LOW→HIGH.
+                let mut g1: u32 = 1_000;
+                while self.busy.is_high().unwrap_or(true) && g1 > 0 {
+                    self.delay.delay_ms(1);
+                    g1 -= 1;
+                }
+                if self.busy.is_low().unwrap_or(false) {
+                    let mut g2: u32 = 30_000;
+                    while self.busy.is_low().unwrap_or(false) && g2 > 0 {
+                        self.delay.delay_ms(1);
+                        g2 -= 1;
+                    }
+                }
+            }
         }
     }
 
@@ -152,9 +248,14 @@ where
         self.delay.delay_ms(20);
     }
 
-    /// Full power-up + SSD1677 controller init (EInkDisplay.cpp:751-860).
+    /// Full power-up + controller init (EInkDisplay.cpp:751-860).
     pub fn init(&mut self) {
         self.reset();
+        if self.variant == Variant::X3 {
+            self.delay.delay_ms(50); // extra settle after reset on X3
+            self.init_x3();
+            return;
+        }
 
         self.send_command(CMD_SOFT_RESET);
         self.wait_while_busy();
@@ -237,6 +338,11 @@ where
     /// Push the framebuffer to the panel and refresh
     /// (single-buffer policy, EInkDisplay.cpp:1433-1464 + refreshDisplay).
     pub fn display(&mut self, mode: RefreshMode, turn_off: bool) {
+        if self.variant == Variant::X3 {
+            self.display_x3(turn_off);
+            return;
+        }
+
         // Waking from off forces a stronger (Half) waveform.
         let mode = if !self.screen_on && !turn_off {
             RefreshMode::Half
@@ -316,6 +422,139 @@ where
         let fill = if white { 0xFF } else { 0x00 };
         for b in self.fb.iter_mut() {
             *b = fill;
+        }
+    }
+
+    // ── X3 (UC81xx) path (EInkDisplay.cpp:751-810, 652-745, 1302-1430) ───────
+
+    fn row_bytes(&self) -> usize {
+        self.width as usize / 8
+    }
+
+    /// UC81xx panel power-up + init (EInkDisplay.cpp:753-810).
+    fn init_x3(&mut self) {
+        self.send_command(X3_PANEL_SETTING);
+        self.send_data(0x3F);
+        self.send_data(0x0A);
+        self.send_command(X3_RESOLUTION);
+        for b in [0x03, 0x18, 0x02, 0x58] {
+            self.send_data(b);
+        }
+        self.send_command(X3_GATE_SOURCE_START);
+        for _ in 0..4 {
+            self.send_data(0x00);
+        }
+        self.send_command(0x03); // power-off sequence (PFS)
+        self.send_data(0x20);
+        self.send_command(X3_POWER_SETTING);
+        for b in [0x07, 0x17, 0x3F, 0x3F, 0x17] {
+            self.send_data(b);
+        }
+        self.send_command(X3_VCOM_DC);
+        self.send_data(0x24);
+        self.send_command(X3_BOOSTER_SOFT_START);
+        for b in [0x25, 0x25, 0x3C, 0x37] {
+            self.send_data(b);
+        }
+        self.send_command(X3_PLL_CONTROL);
+        self.send_data(0x09);
+        self.send_command(X3_LV_SELECTION);
+        self.send_data(0x02);
+
+        // Clear both RAM planes to white (UC81xx has no auto-clear opcode).
+        self.fill_plane_x3(X3_DTM1, 0xFF);
+        self.send_command(X3_DATA_STOP);
+        self.fill_plane_x3(X3_DTM2, 0xFF);
+        self.send_command(X3_DATA_STOP);
+
+        for b in self.fb.iter_mut() {
+            *b = 0xFF;
+        }
+        self.screen_on = false;
+    }
+
+    /// Fill a whole RAM plane with one byte (EInkDisplay.cpp:680-695). Streams a
+    /// small row buffer so the 50 KB framebuffer is untouched.
+    fn fill_plane_x3(&mut self, ram_cmd: u8, fill: u8) {
+        self.send_command(ram_cmd);
+        let rb = self.row_bytes();
+        let row = [fill; 128];
+        let _ = self.dc.set_high();
+        for _ in 0..self.height {
+            let _ = self.spi.write(&row[..rb]);
+        }
+    }
+
+    /// Swap framebuffer rows top↔bottom in place (the X3 scans gates upward, so
+    /// the buffer is Y-flipped before sending and restored after).
+    fn x3_flip_rows(&mut self) {
+        let rb = self.row_bytes();
+        let h = self.height as usize;
+        let mut tmp = [0u8; 128];
+        let (mut top, mut bot) = (0usize, h - 1);
+        while top < bot {
+            let (a, b) = (top * rb, bot * rb);
+            tmp[..rb].copy_from_slice(&self.fb[a..a + rb]);
+            self.fb.copy_within(b..b + rb, a);
+            self.fb[b..b + rb].copy_from_slice(&tmp[..rb]);
+            top += 1;
+            bot -= 1;
+        }
+    }
+
+    /// Send the framebuffer into a RAM plane, Y-flipped (EInkDisplay.cpp:652-678).
+    fn send_plane_x3(&mut self, ram_cmd: u8) {
+        self.x3_flip_rows();
+        self.send_command(ram_cmd);
+        let len = self.buffer_size();
+        let _ = self.dc.set_high();
+        let _ = self.spi.write(&self.fb[..len]);
+        self.x3_flip_rows(); // restore
+    }
+
+    /// Load the OEM full-quality LUT bank with CDI 0x29,0x07
+    /// (EInkDisplay.cpp:707-712, 1303).
+    fn load_lut_bank_x3_full(&mut self) {
+        self.send_command(X3_VCOM_DATA_INTERVAL);
+        self.send_data(0x29);
+        let banks = [
+            &X3_LUT_VCOM_FULL,
+            &X3_LUT_WW_FULL,
+            &X3_LUT_BW_FULL,
+            &X3_LUT_WB_FULL,
+            &X3_LUT_BB_FULL,
+        ];
+        for (i, lut) in banks.iter().enumerate() {
+            self.send_command(X3_LUT_VCOM + i as u8); // 0x20..0x24
+            self.send_data_bulk(&lut[..42]);
+        }
+    }
+
+    /// X3 full refresh (EInkDisplay.cpp:1302-1322 + triggerRefreshX3). Full sync
+    /// only: DTM1 = white baseline, DTM2 = frame, then DRF. (The differential
+    /// fast/half LUT banks are a future optimisation.)
+    fn display_x3(&mut self, turn_off: bool) {
+        self.load_lut_bank_x3_full();
+        self.fill_plane_x3(X3_DTM1, 0xFF);
+        self.send_command(X3_DATA_STOP);
+        self.send_plane_x3(X3_DTM2);
+
+        if !self.screen_on {
+            self.send_command(X3_POWER_ON);
+            self.wait_while_busy();
+            self.screen_on = true;
+        }
+        self.send_command(X3_DISPLAY_REFRESH);
+        self.wait_while_busy();
+
+        // Sync DTM1 ("old" plane) with the shown frame for the next refresh.
+        self.send_plane_x3(X3_DTM1);
+        self.send_command(X3_DATA_STOP);
+
+        if turn_off {
+            self.send_command(X3_POWER_OFF);
+            self.wait_while_busy();
+            self.screen_on = false;
         }
     }
 }

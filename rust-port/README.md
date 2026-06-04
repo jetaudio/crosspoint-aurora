@@ -130,7 +130,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | EPUB: ZIP container → inflate chapter → text → paginate | ✅ (host-tested; in-RAM ≤64 KB) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
-| X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
+| X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; needs X3 hardware to validate; diff fast/half LUTs deferred) |
 | Wi-Fi / Calibre wireless, settings UI | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
@@ -144,5 +144,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Persist settings to the SD card (the in-memory Settings screen works); the
    File-Transfer tab (needs Wi-Fi, below).
-6. X3 variant (UC81xx) display path.
+6. X3 auto-detection glue (I2C fingerprint on GPIO0/20 shares the X4 battery-ADC
+   pin) + the X3 differential fast/half LUT banks. The X3 display driver itself
+   is ported (`core/driver/eink.rs`, `Variant::X3`).
 7. Wi-Fi / Calibre wireless (esp-wifi) — needs on-hardware validation.
