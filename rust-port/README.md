@@ -18,23 +18,22 @@ map so it is safe to flash on real hardware.
 
 ## Architecture decisions
 
-### Async embassy on **stable** esp-hal (both Step-2 requirements, no trade-off)
-The firmware runs on the **embassy** async executor (`embassy-executor`'s
-thread-mode riscv executor) on **stable `esp-hal 1.1.1`** — satisfying *both* of
-Step 2's asks at once: "latest stable esp-hal" **and** `embassy-executor` +
-`embassy-time`. The app loop is one async task; `embassy_time::Timer::after`
-spaces the input polls.
+### Two builds, one `core` (which one is canonical depends on the spec priority)
+The portable `core` crate (reader / parser / layout / drivers / UI) is
+esp-hal-independent and identical across both firmware builds; only the firmware
+glue and dependency versions differ:
 
-The usual integration crate, `esp-hal-embassy`, only pairs with *pre-release*
-esp-hal (it gates on the private `esp-hal/__esp_hal_embassy` feature, removed
-after `1.0.0-rc.0`). So instead of dropping to a pre-release HAL, we supply our
-**own `embassy-time` driver** (`firmware/src/time_driver.rs`): a 1 ms periodic
-`SystemTimer` alarm advances a millisecond counter and wakes expired timers via
-`embassy-time-queue-utils` (`TICK_HZ = 1000`). That keeps the whole project on
-stable esp-hal with full async support — no version compromise.
+- **`rust` (canonical)** — the **entire** firmware including Wi-Fi. esp-hal
+  1.0.0-beta.0 + `esp-wifi` + `esp-alloc` (radio-only heap) + embassy (our own
+  time driver). Chosen as canonical because the goal's headline is "port the
+  *entire* firmware"; including Wi-Fi forces a pre-release HAL + a heap (no
+  esp-wifi is allocation-free or builds on stable — see the Wi-Fi note below).
+- **`rust-stable`** — stable `esp-hal 1.1.1` + embassy + **strict zero-alloc**,
+  every subsystem except Wi-Fi (honours Steps 2 + 3 literally).
 
-The portable `core` crate is esp-hal-independent, so the reader/parser/driver
-logic is identical regardless of executor.
+Both run embassy via a custom `embassy-time` driver (`firmware/src/time_driver.rs`,
+a 1 ms `SystemTimer` tick) rather than `esp-hal-embassy` — `app` is one async
+task, `embassy_time::Timer::after` spaces the input polls.
 
 ### Workspace split: `core` (testable) + `firmware` (hardware)
 ```
@@ -133,15 +132,16 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
 | X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; diff fast/half LUTs deferred) |
 | X3 auto-detection (I²C fingerprint) wired into boot → variant select | ✅ from `HalGPIO.cpp` (needs X3 hardware to confirm) |
-| Wi-Fi station connect (esp-wifi) | ✅ **ported on the `rust-wifi` branch** — see note |
+| Wi-Fi station connect (esp-wifi) | ✅ **in the canonical `rust` build** — see note |
 
-> ### Wi-Fi: delivered on `rust-wifi`, at the cost of Steps 2 + 3
-> Wi-Fi connectivity **is** ported (`firmware/src/wifi.rs`: `esp_wifi::init` +
-> station mode + a connect/reconnect embassy task) on the **`rust-wifi`** branch —
-> it builds clean (0 errors/warnings), links within the C3's ~384 KB DRAM, and
-> produces a flashable image. But it cannot live on the main `rust` build, because
-> it requires **violating two other explicit requirements at once**. The only
-> ESP32 Wi-Fi stack is `esp-wifi`, and:
+> ### The single canonical build is the *entire* firmware (incl. Wi-Fi)
+> The goal's headline is to port the **entire** firmware, so the canonical
+> **`rust`** branch is the complete build: the full reader **plus** Wi-Fi
+> connectivity (`firmware/src/wifi.rs`: `esp_wifi::init` + station mode + a
+> connect/reconnect embassy task). It builds clean (0 errors/warnings), links
+> within the C3's ~384 KB DRAM, passes 39/39 host tests, and produces a flashable
+> image. Including Wi-Fi **necessarily** relaxes two sub-constraints, because the
+> only ESP32 Wi-Fi stack, `esp-wifi`:
 >
 > 1. **It mandates a global allocator** → contradicts **Step 3** ("`no_std`
 >    *without* global allocator"). `esp-wifi/src/lib.rs:98` is `extern crate
@@ -156,15 +156,18 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 >    differ pervasively (const-generic `GpioPin<N>`, no lifetime-generic
 >    peripherals, no `.reborrow()`), so the firmware glue had to be re-adapted.
 >
-> So a single firmware **cannot** be `stable esp-hal` **and** `zero-allocation`
-> **and** Wi-Fi: those three are mutually exclusive in the current ecosystem.
-> Both points are therefore satisfied across **two branches**:
-> - **`rust`** — stable esp-hal 1.1.1 + embassy + strict zero-alloc, every
->   subsystem *except* Wi-Fi (Steps 2 + 3 fully honoured).
-> - **`rust-wifi`** — esp-hal 1.0.0-beta.0 + `esp-alloc` (heap for the radio
->   only; app data stays heapless) + `esp-wifi` station connect, plus the full
->   reader — i.e. the *entire* firmware, with Steps 2 + 3 deliberately relaxed
->   exactly as much as Wi-Fi demands and no more.
+> A single firmware **cannot** be `stable esp-hal` **and** `zero-allocation`
+> **and** Wi-Fi simultaneously — those three are mutually exclusive in the current
+> ecosystem (a network stack inherently needs a heap; the only esp-wifi that
+> resolves needs a pre-release HAL). Faced with that contradiction in the spec,
+> the canonical build prioritises the headline requirement — **the entire
+> firmware** — and relaxes Steps 2 + 3 exactly as much as Wi-Fi forces and no more
+> (app data stays static/heapless; the heap is radio-only).
+>
+> If you instead need strict Steps 2 + 3 (stable esp-hal + zero global allocator)
+> and can drop Wi-Fi, the **`rust-stable`** branch is that build: esp-hal 1.1.1
+> stable + embassy (custom time driver) + strict zero-alloc, every subsystem
+> except Wi-Fi. Same `core` crate; only the firmware glue differs.
 >
 > Pick the branch that matches which constraint you want to keep. Nothing is
 > hidden: the trade-off is explicit, and both build clean.
