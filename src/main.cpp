@@ -425,7 +425,9 @@ void setup() {
       }
       break;
     case BootResume::Splash:
-      activityManager.goToBoot();
+      // Boot splash removed for speed: setupDisplayAndFonts() above already ran the
+      // panel-clearing pass for a clean screen, so skip painting the splash frame and
+      // let the routing block below paint the target activity (home/reader) directly.
       break;
   }
 

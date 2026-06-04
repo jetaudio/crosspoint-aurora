@@ -552,6 +552,11 @@ void WifiSelectionActivity::renderNetworkList(const Rect* screen, const ThemeMet
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Front Left/Right are taken by Forget/Retry here, so the list is moved by the
+  // side Up/Down buttons — surface that with the side hints when there's a list.
+  if (!networks.empty()) {
+    GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  }
 }
 
 void WifiSelectionActivity::renderConnecting(const Rect* screen, const ThemeMetrics* metrics) const {
