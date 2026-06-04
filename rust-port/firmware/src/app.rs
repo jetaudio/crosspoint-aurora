@@ -51,8 +51,10 @@ pub fn run(p: Peripherals) -> ! {
     let rst = Output::new(p.GPIO5, Level::High, OutputConfig::default());
     let busy = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
 
-    // SD card chip-select on the shared bus (idle high = deselected).
-    let sd_cs = Output::new(p.GPIO12, Level::High, OutputConfig::default());
+    // SD card chip-select on the shared bus (idle high = deselected). Kept owned
+    // and mutable so a fresh RefCellDevice can be made per SD operation (passing
+    // `&mut sd_cs` as the CS), leaving the card free to be re-accessed later.
+    let mut sd_cs = Output::new(p.GPIO12, Level::High, OutputConfig::default());
 
     // ── Shared SPI bus: SCLK=8, MOSI=10, MISO=7, Mode 0, 40 MHz ─────────────
     // The display and SD card share SPI2; each gets a RefCellDevice with its own
@@ -69,7 +71,6 @@ pub fn run(p: Peripherals) -> ! {
     .with_miso(p.GPIO7);
     let spi_bus: RefCell<_> = RefCell::new(spi);
     let display_dev = RefCellDevice::new(&spi_bus, cs, delay).expect("display SPI device");
-    let sd_dev = RefCellDevice::new(&spi_bus, sd_cs, delay).expect("SD SPI device");
 
     // ── E-ink driver (over its shared SPI device) ────────────────────────────
     let fb: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER) };
@@ -107,23 +108,23 @@ pub fn run(p: Peripherals) -> ! {
         margin_y: 34, // leaves a title strip at the top
         line_height: 14,
     };
-    // Try to read the first book file off the SD card; fall back to the bundled
-    // sample if there's no card / volume / file. Consuming `sd_dev` here releases
-    // its shared-bus borrow before the superloop (the display keeps its own).
     let book_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(BOOK_BUF) };
-    let book_len = crate::sd::load_first_book(sd_dev, delay, book_buf);
-    let book_text: &[u8] = if book_len > 0 {
-        esp_println::println!("crosspoint-rs: loaded {} bytes from SD", book_len);
-        &book_buf[..book_len]
-    } else {
-        esp_println::println!("crosspoint-rs: no SD book, using bundled sample");
-        SAMPLE_TEXT
-    };
-
-    let mut reader = Reader::new(book_text, reader_metrics, adv6);
-    let mut home = Menu::new(HOME_ITEMS);
-    let mut browser = Menu::new(FILE_ITEMS);
+    let mut home = Menu::from_items(HOME_ITEMS);
+    let mut browser = Menu::new();
+    // The reader is created when a file is opened from the browser.
+    let mut reader: Option<Reader> = None;
     let mut active = Active::Home;
+
+    // List the SD root into the browser. If there's no card / no files, fall back
+    // to a single sample entry so the demo still works without an SD card.
+    {
+        let dev = RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
+        let n = crate::sd::list_files(dev, delay, &mut browser);
+        esp_println::println!("crosspoint-rs: {} files on SD", n);
+        if n == 0 {
+            let _ = browser.push(SAMPLE_NAME);
+        }
+    }
 
     // Read the battery once at boot; refreshed on each redraw below. With curve
     // calibration `read_oneshot` yields millivolts; spin to block (WouldBlock).
@@ -137,7 +138,7 @@ pub fn run(p: Peripherals) -> ! {
     };
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_active(&mut eink, active, &home, &browser, &reader);
+    draw_active(&mut eink, active, &home, &browser, reader.as_ref());
     draw_battery(&mut eink, battery_pct);
     eink.display(RefreshMode::Full, false);
 
@@ -177,9 +178,22 @@ pub fn run(p: Peripherals) -> ! {
                 Active::Browser => match event {
                     Some(Event::Up) => (browser.up(), false),
                     Some(Event::Down) => (browser.down(), false),
-                    // Selecting a file opens it in the reader. (Every entry maps
-                    // to the bundled sample until SD-card loading is wired up.)
+                    // Open the selected file: drop any current reader (releasing
+                    // its book_buf borrow), read the file into book_buf, then make
+                    // a fresh reader over it. Falls back to the bundled sample if
+                    // the read returns nothing.
                     Some(Event::Select) => {
+                        if let Some(name) = browser.selected_item() {
+                            // Drop any current reader first so its borrow of
+                            // book_buf ends before we read into book_buf again.
+                            drop(reader.take());
+                            let dev =
+                                RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
+                            let n = crate::sd::load_named(dev, delay, name, book_buf);
+                            let text: &[u8] = if n > 0 { &book_buf[..n] } else { SAMPLE_TEXT };
+                            esp_println::println!("crosspoint-rs: open '{}' -> {} bytes", name, n);
+                            reader = Some(Reader::new(text, reader_metrics, adv6));
+                        }
                         active = Active::Reader;
                         (true, true)
                     }
@@ -189,10 +203,10 @@ pub fn run(p: Peripherals) -> ! {
                     }
                     _ => (false, false),
                 },
-                Active::Reader => match event {
-                    Some(Event::NextPage) => (reader.next_page(), false),
-                    Some(Event::PrevPage) => (reader.prev_page(), false),
-                    Some(Event::Back) => {
+                Active::Reader => match (event, reader.as_mut()) {
+                    (Some(Event::NextPage), Some(r)) => (r.next_page(), false),
+                    (Some(Event::PrevPage), Some(r)) => (r.prev_page(), false),
+                    (Some(Event::Back), _) => {
                         active = Active::Browser;
                         (true, true)
                     }
@@ -208,7 +222,7 @@ pub fn run(p: Peripherals) -> ! {
                     };
                     crosspoint_core::battery::percentage_from_adc_millivolts(mv)
                 };
-                draw_active(&mut eink, active, &home, &browser, &reader);
+                draw_active(&mut eink, active, &home, &browser, reader.as_ref());
                 draw_battery(&mut eink, battery_pct);
                 let mode = if screen_change {
                     RefreshMode::Full
@@ -240,9 +254,8 @@ enum Active {
 /// Home menu entries.
 const HOME_ITEMS: &[&str] = &["Open book", "About"];
 
-/// File browser entries. Static stub until SD-card listing is wired up; every
-/// entry currently opens the bundled sample text.
-const FILE_ITEMS: &[&str] = &["a-tale-of-two-cities.txt", "sample.txt", "notes.txt"];
+/// Browser entry shown when no SD card / files are present; opens the sample.
+const SAMPLE_NAME: &str = "sample.txt";
 
 /// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
 fn adv6(_c: char) -> u16 {
@@ -250,14 +263,23 @@ fn adv6(_c: char) -> u16 {
 }
 
 /// Dispatch a render to whichever screen is active.
-fn draw_active<D>(target: &mut D, active: Active, home: &Menu, browser: &Menu, reader: &Reader)
-where
+fn draw_active<D>(
+    target: &mut D,
+    active: Active,
+    home: &Menu,
+    browser: &Menu,
+    reader: Option<&Reader>,
+) where
     D: DrawTarget<Color = BinaryColor>,
 {
     match active {
         Active::Home => draw_menu(target, "CrossPoint", home),
         Active::Browser => draw_menu(target, "Books", browser),
-        Active::Reader => draw_reader(target, reader),
+        Active::Reader => {
+            if let Some(r) = reader {
+                draw_reader(target, r);
+            }
+        }
     }
 }
 
@@ -279,13 +301,7 @@ where
         margin_y: 60,
         line_height: 16,
     };
-    let _ = ui::render_menu(
-        target,
-        menu.items(),
-        menu.selected(),
-        &menu_metrics,
-        body_style,
-    );
+    let _ = ui::render_menu(target, menu, &menu_metrics, body_style);
 }
 
 /// Draw the battery percentage in the top-right corner (status bar).

@@ -119,20 +119,19 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
 | Menu widget + Home → Browser → Reader navigation | ✅ (host-tested) |
-| File browser screen (stub list until SD listing is wired) | ✅ |
+| Menu widget (owned strings) + 3-screen navigation | ✅ (host-tested) |
 | Shared SPI2 bus (display + SD via SpiDevice/RefCellDevice) | ✅ |
-| SD card (FAT) mount + read first book into the Reader | ✅ from `SDCardManager.cpp` (needs on-HW speed check) |
+| File browser lists the SD root + opens the selected file | ✅ from `SDCardManager.cpp` (needs on-HW speed check) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
 | EPUB/HTML parsing, SD/FAT, fonts on disk, file browser, Wi-Fi, settings | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
-1. Populate the file browser from the SD root listing (an owned-string menu) so
-   the user picks which file `load_*` opens — the read path already works; only
-   the browser still shows a static list and always opens the first file.
-2. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it.
-3. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
+1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
+   scrolling the browser past a screenful of files (paged list).
+2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
    variable-width `advance` so wrapping matches proportional fonts).
+3. Persist the last-read position per book.
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Port the Aurora home layout (featured card + tab bar).
 6. X3 variant (UC81xx) display path.

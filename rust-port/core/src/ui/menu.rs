@@ -1,30 +1,82 @@
-//! A reusable vertical menu widget: a list of items with a wrapping cursor.
+//! A reusable vertical menu widget: a list of owned item strings with a
+//! wrapping cursor.
 //!
-//! Used for both the Home screen and the file Browser — anywhere the firmware
-//! shows a selectable list navigated with Up/Down and chosen with Select.
+//! Used for both the Home screen (fixed entries) and the file Browser (entries
+//! built at runtime from the SD-card root listing). Items are owned `heapless`
+//! strings so the browser can hold names read off the card without allocation.
 
-/// A vertical menu with a wrapping selection cursor over a fixed item list.
+use heapless::String;
+use heapless::Vec;
+
+/// Max characters per menu entry. FAT short names are 8.3 (≤ 12 chars); 24
+/// leaves room for a little decoration.
+pub const MAX_ITEM_LEN: usize = 24;
+/// Max entries in a menu.
+pub const MAX_ITEMS: usize = 32;
+
+/// A vertical menu with a wrapping selection cursor over owned item strings.
+#[derive(Default)]
 pub struct Menu {
-    items: &'static [&'static str],
+    items: Vec<String<MAX_ITEM_LEN>, MAX_ITEMS>,
     selected: usize,
 }
 
 impl Menu {
-    pub fn new(items: &'static [&'static str]) -> Self {
-        Self { items, selected: 0 }
+    /// An empty menu (fill with [`Menu::push`]).
+    pub fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            selected: 0,
+        }
     }
 
-    pub fn items(&self) -> &'static [&'static str] {
-        self.items
+    /// Build a menu from a fixed list of `&str` items (truncated to fit).
+    pub fn from_items(items: &[&str]) -> Self {
+        let mut m = Self::new();
+        for it in items {
+            let _ = m.push(it);
+        }
+        m
+    }
+
+    /// Append an item (truncated to `MAX_ITEM_LEN`). Returns false if the menu
+    /// is already full.
+    pub fn push(&mut self, text: &str) -> bool {
+        let mut s: String<MAX_ITEM_LEN> = String::new();
+        for ch in text.chars() {
+            if s.push(ch).is_err() {
+                break; // truncate to capacity
+            }
+        }
+        self.items.push(s).is_ok()
+    }
+
+    /// Remove all items and reset the cursor.
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.selected = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
     }
 
     pub fn selected(&self) -> usize {
         self.selected
     }
 
+    /// The `i`-th item's text, if present.
+    pub fn item(&self, i: usize) -> Option<&str> {
+        self.items.get(i).map(|s| s.as_str())
+    }
+
     /// The selected item's text, if any.
-    pub fn selected_item(&self) -> Option<&'static str> {
-        self.items.get(self.selected).copied()
+    pub fn selected_item(&self) -> Option<&str> {
+        self.item(self.selected)
     }
 
     /// Move the cursor up, wrapping to the bottom. Returns true if it moved.
@@ -54,11 +106,10 @@ impl Menu {
 mod tests {
     use super::*;
 
-    const ITEMS: &[&str] = &["Open book", "About"];
-
     #[test]
     fn wraps_both_directions() {
-        let mut m = Menu::new(ITEMS);
+        let mut m = Menu::from_items(&["Open book", "About"]);
+        assert_eq!(m.len(), 2);
         assert_eq!(m.selected(), 0);
         assert!(m.down());
         assert_eq!(m.selected(), 1);
@@ -71,10 +122,21 @@ mod tests {
 
     #[test]
     fn empty_menu_is_inert() {
-        let mut m = Menu::new(&[]);
+        let mut m = Menu::new();
+        assert!(m.is_empty());
         assert!(!m.up());
         assert!(!m.down());
-        assert_eq!(m.selected(), 0);
         assert_eq!(m.selected_item(), None);
+    }
+
+    #[test]
+    fn push_truncates_and_caps() {
+        let mut m = Menu::new();
+        let long = "this-name-is-way-too-long-to-fit-in-the-buffer.txt";
+        assert!(m.push(long));
+        assert!(m.item(0).unwrap().len() <= MAX_ITEM_LEN);
+        // Fill to capacity and confirm the cap.
+        while m.push("x") {}
+        assert_eq!(m.len(), MAX_ITEMS);
     }
 }
