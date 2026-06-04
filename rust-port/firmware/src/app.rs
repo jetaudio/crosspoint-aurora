@@ -4,11 +4,13 @@
 //! loop polling input and re-rendering on demand. All hardware wiring uses the
 //! exact pins from `discovered_pins.md`.
 
+use core::fmt::Write as _;
+
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
-use embedded_graphics::text::Text;
+use embedded_graphics::text::{Baseline, Text};
 use embedded_hal::delay::DelayNs;
 
 use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
@@ -21,7 +23,9 @@ use esp_hal::time::Rate;
 
 use crosspoint_core::driver::{Eink, RefreshMode};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
-use crosspoint_core::pins::{self, Button};
+use crosspoint_core::layout::PageMetrics;
+use crosspoint_core::pins;
+use crosspoint_core::ui::{self, Event, Reader};
 
 /// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
 /// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
@@ -77,8 +81,19 @@ pub fn run(p: Peripherals) -> ! {
     // Power button (GPIO3, active low). Held long here would trigger power_off.
     let power_btn = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
 
+    // ── Reader: flow a sample book through wrap/paginate ─────────────────────
+    // FONT_6X10 is a fixed 6 px-wide cell, so the wrap advance is a constant 6.
+    let metrics = PageMetrics {
+        width: pins::X4_WIDTH,
+        height: pins::X4_HEIGHT,
+        margin_x: 16,
+        margin_y: 34, // leaves a title strip at the top
+        line_height: 14,
+    };
+    let mut reader = Reader::new(SAMPLE_TEXT, metrics, adv6);
+
     // ── First render ─────────────────────────────────────────────────────────
-    draw_home(&mut eink, None);
+    draw_reader(&mut eink, &reader);
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -100,9 +115,16 @@ pub fn run(p: Peripherals) -> ! {
         let pressed = decode_group1(v1).or_else(|| decode_group2(v2));
 
         if let Some(btn) = btn_state.update(pressed) {
-            draw_home(&mut eink, Some(btn));
-            // Page-turn style: fast differential refresh.
-            eink.display(RefreshMode::Fast, false);
+            // Left/Right (or Up/Down) turn pages; redraw only on a real change.
+            let changed = match ui::map_button(btn) {
+                Some(Event::NextPage) | Some(Event::Down) => reader.next_page(),
+                Some(Event::PrevPage) | Some(Event::Up) => reader.prev_page(),
+                _ => false,
+            };
+            if changed {
+                draw_reader(&mut eink, &reader);
+                eink.display(RefreshMode::Fast, false); // fast diff for page turns
+            }
         }
 
         // Power button held (active low) → shut down via the latch.
@@ -115,33 +137,53 @@ pub fn run(p: Peripherals) -> ! {
     }
 }
 
-/// Render the placeholder home screen, optionally echoing the last button.
-fn draw_home<D>(target: &mut D, last: Option<Button>)
+/// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
+fn adv6(_c: char) -> u16 {
+    6
+}
+
+/// Render the reader: title strip, the current page's wrapped lines, and a
+/// `page X/Y` footer.
+fn draw_reader<D>(target: &mut D, reader: &Reader)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     let _ = target.clear(BinaryColor::Off); // white
 
-    let title = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
-    let body = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+    let title_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
 
-    let _ = Text::new("CrossPoint (Rust)", Point::new(40, 60), title).draw(target);
-    let _ = Text::new(
-        "no_std / esp-hal 1.1 / SSD1677 800x480",
-        Point::new(40, 90),
-        body,
+    let _ = Text::with_baseline(
+        "CrossPoint Reader",
+        Point::new(16, 6),
+        title_style,
+        Baseline::Top,
     )
     .draw(target);
 
-    let label = match last {
-        Some(Button::Back) => "Last: Back",
-        Some(Button::Confirm) => "Last: Confirm",
-        Some(Button::Left) => "Last: Left",
-        Some(Button::Right) => "Last: Right",
-        Some(Button::Up) => "Last: Up",
-        Some(Button::Down) => "Last: Down",
-        Some(Button::Power) => "Last: Power",
-        None => "Press a button...",
-    };
-    let _ = Text::new(label, Point::new(40, 130), body).draw(target);
+    let lines = reader.page_lines();
+    let _ = ui::render_lines(target, &lines, reader.metrics(), body_style);
+
+    // Footer: "page X/Y" (1-based), formatted without allocation.
+    let mut footer: heapless::String<24> = heapless::String::new();
+    let _ = write!(
+        footer,
+        "page {}/{}",
+        reader.current_page() + 1,
+        reader.total_pages()
+    );
+    let fy = pins::X4_HEIGHT as i32 - 18;
+    let _ =
+        Text::with_baseline(&footer, Point::new(16, fy), body_style, Baseline::Top).draw(target);
 }
+
+/// A short public-domain sample so the reader has something to paginate before
+/// SD-card loading is wired up.
+const SAMPLE_TEXT: &[u8] = b"CrossPoint Reader - Rust port demo.\n\n\
+It was the best of times, it was the worst of times, it was the age of \
+wisdom, it was the age of foolishness, it was the epoch of belief, it was \
+the epoch of incredulity, it was the season of Light, it was the season of \
+Darkness, it was the spring of hope, it was the winter of despair.\n\n\
+We had everything before us, we had nothing before us, we were all going \
+direct to Heaven, we were all going direct the other way.\n\n\
+Press Left and Right to turn the page. Press the power button to shut down.";

@@ -24,3 +24,4 @@ esp-println = { version = "=0.15.0", features = ["esp32c3", "log-04"] }
 
 embedded-graphics = "0.8"
 embedded-hal = "1.0"
+heapless = "0.8"

@@ -104,7 +104,7 @@ mod tests {
         b[2..4].copy_from_slice(&1u16.to_le_bytes()); // glyph_count
         b[8..10].copy_from_slice(&20u16.to_le_bytes()); // line_height
         b[10..12].copy_from_slice(&32u16.to_le_bytes()); // first_codepoint ' '
-        // glyph 0
+                                                         // glyph 0
         b[HEADER_LEN] = 6; // width
         b[HEADER_LEN + 1] = 12; // height
         b[HEADER_LEN + 4] = 7; // advance
