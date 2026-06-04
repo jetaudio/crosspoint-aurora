@@ -45,6 +45,15 @@ pub const X4_BUFFER_SIZE: usize = (X4_WIDTH as usize / 8) * X4_HEIGHT as usize;
 // UC81xx panel on X3: 792×528.
 pub const X3_WIDTH: u16 = 792;
 pub const X3_HEIGHT: u16 = 528;
+/// X3 plane size = 792/8 * 528 = 52272 bytes (larger than the X4's 48000).
+pub const X3_BUFFER_SIZE: usize = (X3_WIDTH as usize / 8) * X3_HEIGHT as usize;
+
+/// The framebuffer must hold the larger of the two panels' planes.
+pub const MAX_BUFFER_SIZE: usize = if X3_BUFFER_SIZE > X4_BUFFER_SIZE {
+    X3_BUFFER_SIZE
+} else {
+    X4_BUFFER_SIZE
+};
 
 /// Logical button indices, matching the C++ `HalGPIO::BTN_*` constants.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

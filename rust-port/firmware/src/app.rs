@@ -20,13 +20,14 @@ use embedded_hal::delay::DelayNs;
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::Peripherals;
 use esp_hal::peripherals::ADC1;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
 
-use crosspoint_core::driver::{Eink, RefreshMode};
+use crosspoint_core::driver::{Eink, RefreshMode, Variant};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
 use crosspoint_core::layout::PageMetrics;
 use crosspoint_core::pins;
@@ -34,10 +35,10 @@ use crosspoint_core::ui::{
     self, AuroraHome, Event, HomeAction, Menu, Reader, Settings, Zone, TAB_LABELS,
 };
 
-/// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
-/// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
-/// the first draw, and every render clears it first.
-static mut FRAMEBUFFER: [u8; pins::X4_BUFFER_SIZE] = [0; pins::X4_BUFFER_SIZE];
+/// 1bpp framebuffer, sized for the larger panel (X3 = 52272 B) so either
+/// variant fits. Zero-initialised → lands in `.bss`; `Eink::init` fills 0xFF
+/// before the first draw, and every render clears it first.
+static mut FRAMEBUFFER: [u8; pins::MAX_BUFFER_SIZE] = [0; pins::MAX_BUFFER_SIZE];
 
 /// Buffer a book file is read into from the SD card (32 KB → ~paginates a short
 /// book/chapter). Lives in `.bss`. Falls back to the bundled sample if empty.
@@ -51,7 +52,7 @@ const EPUB_BUF_SIZE: usize = 64 * 1024;
 static mut EPUB_BUF: [u8; EPUB_BUF_SIZE] = [0; EPUB_BUF_SIZE];
 
 /// Bring up the board and run the superloop forever.
-pub fn run(p: Peripherals) -> ! {
+pub fn run(mut p: Peripherals) -> ! {
     let delay = Delay::new();
 
     // ── Display control GPIOs (exact pins) ───────────────────────────────────
@@ -81,17 +82,47 @@ pub fn run(p: Peripherals) -> ! {
     let spi_bus: RefCell<_> = RefCell::new(spi);
     let display_dev = RefCellDevice::new(&spi_bus, cs, delay).expect("display SPI device");
 
+    // ── Device detection: X3 vs X4 by I²C fingerprint ────────────────────────
+    // SCL shares GPIO0 with the X4 battery ADC, so the bus is reborrowed here
+    // and dropped before the ADC takes GPIO0 below. (SDA=20, SCL=0, 400 kHz.)
+    let variant = {
+        let mut i2c = I2c::new(
+            p.I2C0.reborrow(),
+            I2cConfig::default().with_frequency(Rate::from_khz(400)),
+        )
+        .expect("I2C init")
+        .with_sda(p.GPIO20.reborrow())
+        .with_scl(p.GPIO0.reborrow());
+        let mut d = delay;
+        if crate::detect::is_x3(&mut i2c, &mut d) {
+            Variant::X3
+        } else {
+            Variant::X4
+        }
+    };
+    let (panel_w, panel_h) = match variant {
+        Variant::X3 => (pins::X3_WIDTH, pins::X3_HEIGHT),
+        Variant::X4 => (pins::X4_WIDTH, pins::X4_HEIGHT),
+    };
+    esp_println::println!(
+        "crosspoint-rs: panel = {:?} ({}x{})",
+        variant,
+        panel_w,
+        panel_h
+    );
+
     // ── E-ink driver (over its shared SPI device) ────────────────────────────
     let fb: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER) };
-    let mut eink = Eink::new(
+    let mut eink = Eink::with_variant(
         display_dev,
         dc,
         rst,
         busy,
         delay,
         fb,
-        pins::X4_WIDTH,
-        pins::X4_HEIGHT,
+        panel_w,
+        panel_h,
+        variant,
     );
     eink.init();
 

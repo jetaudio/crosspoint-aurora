@@ -11,6 +11,7 @@
 use esp_backtrace as _;
 
 mod app;
+mod detect;
 mod power;
 mod sd;
 

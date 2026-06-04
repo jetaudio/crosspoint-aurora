@@ -130,7 +130,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | EPUB: ZIP container → inflate chapter → text → paginate | ✅ (host-tested; in-RAM ≤64 KB) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
-| X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; needs X3 hardware to validate; diff fast/half LUTs deferred) |
+| X3 (UC81xx) display driver: init + full LUT bank + full refresh + active-low BUSY | ✅ ported (`Variant::X3`; diff fast/half LUTs deferred) |
+| X3 auto-detection (I²C fingerprint) wired into boot → variant select | ✅ from `HalGPIO.cpp` (needs X3 hardware to confirm) |
 | Wi-Fi / Calibre wireless | ⛔ **blocked by a constraint conflict** — see note |
 
 > **Wi-Fi vs. the zero-allocation rule.** The only ESP32 Wi-Fi stack, `esp-wifi`
@@ -155,7 +156,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Persist settings to the SD card (the in-memory Settings screen works); the
    File-Transfer tab (needs Wi-Fi, below).
-6. X3 auto-detection glue (I2C fingerprint on GPIO0/20 shares the X4 battery-ADC
-   pin) + the X3 differential fast/half LUT banks. The X3 display driver itself
-   is ported (`core/driver/eink.rs`, `Variant::X3`).
-7. Wi-Fi / Calibre wireless (esp-wifi) — needs on-hardware validation.
+6. The X3 differential fast/half LUT banks (full refresh is ported; X3 detection
+   + driver are wired into boot). X3 battery is via the I²C fuel gauge (the X4
+   ADC path is used as a placeholder on X3).
+7. Wi-Fi / Calibre wireless — blocked by the zero-alloc rule (esp-wifi needs a
+   global allocator); see the note above.
