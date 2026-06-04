@@ -116,14 +116,18 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Front-button ADC decode + debounce | ✅ thresholds from `InputManager.cpp` |
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
+| Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
+| Home menu + Home↔Reader screen navigation | ✅ (host-tested) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
-| EPUB/HTML parsing, SD/FAT, fonts on disk, full reader UI, Wi-Fi, settings | ⛔ roadmap |
+| EPUB/HTML parsing, SD/FAT, fonts on disk, file browser, Wi-Fi, settings | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
-1. SD card over the shared SPI bus (FAT via `embedded-sdmmc`).
-2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer.
-3. Reader activity: paginate a book file end-to-end on device.
-4. Home / file-browser UI (port the Aurora theme's layout).
-5. Battery ADC read + status bar; deep-sleep wake path.
+1. SD card over the shared SPI bus (FAT via `embedded-sdmmc`) — needs a shared
+   `SpiDevice` so the display and SD can share SPI2 with separate CS lines.
+2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
+   variable-width `advance` so wrapping matches proportional fonts).
+3. File browser screen: list real book files from the SD card, open into Reader.
+4. Battery ADC read (GPIO0) + status bar; deep-sleep wake path.
+5. Port the Aurora home layout (featured card + tab bar).
 6. X3 variant (UC81xx) display path.

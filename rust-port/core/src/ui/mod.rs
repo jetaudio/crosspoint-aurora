@@ -3,8 +3,10 @@
 //! Mirrors the C++ firmware's screen model at a small scale — logical `Event`s
 //! decoded from physical buttons, driving a screen (currently the `Reader`).
 
+pub mod home;
 pub mod reader;
 
+pub use home::Home;
 pub use reader::Reader;
 
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -58,6 +60,28 @@ where
             Text::with_baseline(line.text, Point::new(x, y), style, Baseline::Top).draw(target)?;
         }
         y += metrics.line_height as i32;
+    }
+    Ok(())
+}
+
+/// Draw a vertical menu, marking the selected row with a `> ` caret.
+pub fn render_menu<D>(
+    target: &mut D,
+    items: &[&str],
+    selected: usize,
+    metrics: &PageMetrics,
+    style: MonoTextStyle<'_, BinaryColor>,
+) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let x = metrics.margin_x as i32;
+    let mut y = metrics.margin_y as i32;
+    for (i, item) in items.iter().enumerate() {
+        let caret = if i == selected { "> " } else { "  " };
+        Text::with_baseline(caret, Point::new(x, y), style, Baseline::Top).draw(target)?;
+        Text::with_baseline(item, Point::new(x + 24, y), style, Baseline::Top).draw(target)?;
+        y += (metrics.line_height as i32) * 2; // double-space menu rows
     }
     Ok(())
 }

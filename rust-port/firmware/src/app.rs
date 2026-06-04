@@ -25,7 +25,7 @@ use crosspoint_core::driver::{Eink, RefreshMode};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
 use crosspoint_core::layout::PageMetrics;
 use crosspoint_core::pins;
-use crosspoint_core::ui::{self, Event, Reader};
+use crosspoint_core::ui::{self, Event, Home, Reader};
 
 /// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
 /// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
@@ -81,19 +81,21 @@ pub fn run(p: Peripherals) -> ! {
     // Power button (GPIO3, active low). Held long here would trigger power_off.
     let power_btn = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
 
-    // ── Reader: flow a sample book through wrap/paginate ─────────────────────
+    // ── Screens: Home menu + the Reader ──────────────────────────────────────
     // FONT_6X10 is a fixed 6 px-wide cell, so the wrap advance is a constant 6.
-    let metrics = PageMetrics {
+    let reader_metrics = PageMetrics {
         width: pins::X4_WIDTH,
         height: pins::X4_HEIGHT,
         margin_x: 16,
         margin_y: 34, // leaves a title strip at the top
         line_height: 14,
     };
-    let mut reader = Reader::new(SAMPLE_TEXT, metrics, adv6);
+    let mut reader = Reader::new(SAMPLE_TEXT, reader_metrics, adv6);
+    let mut home = Home::new(HOME_ITEMS);
+    let mut active = Active::Home;
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_reader(&mut eink, &reader);
+    draw_active(&mut eink, active, &home, &reader);
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -115,15 +117,38 @@ pub fn run(p: Peripherals) -> ! {
         let pressed = decode_group1(v1).or_else(|| decode_group2(v2));
 
         if let Some(btn) = btn_state.update(pressed) {
-            // Left/Right (or Up/Down) turn pages; redraw only on a real change.
-            let changed = match ui::map_button(btn) {
-                Some(Event::NextPage) | Some(Event::Down) => reader.next_page(),
-                Some(Event::PrevPage) | Some(Event::Up) => reader.prev_page(),
-                _ => false,
+            let event = ui::map_button(btn);
+            // Returns whether to redraw, and whether it was a screen change
+            // (which warrants a stronger full refresh).
+            let (redraw, screen_change) = match active {
+                Active::Home => match event {
+                    Some(Event::Up) => (home.up(), false),
+                    Some(Event::Down) => (home.down(), false),
+                    // Item 0 ("Open book") opens the reader; others are no-ops.
+                    Some(Event::Select) if home.selected() == 0 => {
+                        active = Active::Reader;
+                        (true, true)
+                    }
+                    _ => (false, false),
+                },
+                Active::Reader => match event {
+                    Some(Event::NextPage) => (reader.next_page(), false),
+                    Some(Event::PrevPage) => (reader.prev_page(), false),
+                    Some(Event::Back) => {
+                        active = Active::Home;
+                        (true, true)
+                    }
+                    _ => (false, false),
+                },
             };
-            if changed {
-                draw_reader(&mut eink, &reader);
-                eink.display(RefreshMode::Fast, false); // fast diff for page turns
+            if redraw {
+                draw_active(&mut eink, active, &home, &reader);
+                let mode = if screen_change {
+                    RefreshMode::Full
+                } else {
+                    RefreshMode::Fast
+                };
+                eink.display(mode, false);
             }
         }
 
@@ -137,9 +162,58 @@ pub fn run(p: Peripherals) -> ! {
     }
 }
 
+/// Which screen currently has focus.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Active {
+    Home,
+    Reader,
+}
+
+/// Home menu entries.
+const HOME_ITEMS: &[&str] = &["Open book", "About"];
+
 /// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
 fn adv6(_c: char) -> u16 {
     6
+}
+
+/// Dispatch a render to whichever screen is active.
+fn draw_active<D>(target: &mut D, active: Active, home: &Home, reader: &Reader)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    match active {
+        Active::Home => draw_home(target, home),
+        Active::Reader => draw_reader(target, reader),
+    }
+}
+
+/// Render the home menu: title + selectable entries.
+fn draw_home<D>(target: &mut D, home: &Home)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let _ = target.clear(BinaryColor::Off); // white
+    let title_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
+    let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+
+    let _ = Text::with_baseline("CrossPoint", Point::new(16, 6), title_style, Baseline::Top)
+        .draw(target);
+
+    let menu_metrics = PageMetrics {
+        width: pins::X4_WIDTH,
+        height: pins::X4_HEIGHT,
+        margin_x: 24,
+        margin_y: 60,
+        line_height: 16,
+    };
+    let _ = ui::render_menu(
+        target,
+        home.items(),
+        home.selected(),
+        &menu_metrics,
+        body_style,
+    );
 }
 
 /// Render the reader: title strip, the current page's wrapped lines, and a
