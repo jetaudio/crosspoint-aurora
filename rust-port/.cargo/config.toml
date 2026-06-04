@@ -1,0 +1,19 @@
+# Build configuration for the ESP32-C3 (RISC-V, no_std).
+# The C3 core (riscv32imc) is supported on STABLE Rust — no nightly/xtensa needed.
+
+[build]
+target = "riscv32imc-unknown-none-elf"
+
+[target.riscv32imc-unknown-none-elf]
+# `espflash` flashes + opens the serial monitor. Install with:
+#   cargo install espflash
+runner = "espflash flash --monitor"
+rustflags = [
+  # esp-hal bundles the linker scripts; linkall.x pulls in the memory layout,
+  # ROM symbols and the .text/.rodata/.data/.bss placement for the C3.
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+]
+
+[env]
+ESP_LOG = "info"

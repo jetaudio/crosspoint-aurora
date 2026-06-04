@@ -1,0 +1,26 @@
+[package]
+name = "crosspoint-fw"
+version = "0.1.0"
+edition = "2021"
+description = "CrossPoint e-reader firmware — ESP32-C3 binary (Xteink X4/X3)"
+license = "MIT"
+
+[[bin]]
+name = "crosspoint-fw"
+path = "src/main.rs"
+
+[dependencies]
+crosspoint-core = { path = "../core" }
+
+# Core HAL — esp-hal 1.x STABLE. (We deliberately do NOT use esp-hal-embassy:
+# its latest release 0.9.1 enables esp-hal/__esp_hal_embassy, a private feature
+# that exists only up to esp-hal 1.0.0-rc.0 — so embassy would force a
+# pre-release HAL. A blocking superloop matches the original C++ firmware's
+# Activity update/render model and fits the 384 KB RAM budget better. See README.)
+esp-hal = { version = "=1.1.1", features = ["esp32c3", "unstable"] }
+esp-bootloader-esp-idf = { version = "=0.2.0", features = ["esp32c3"] }
+esp-backtrace = { version = "=0.17.0", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "=0.15.0", features = ["esp32c3", "log-04"] }
+
+embedded-graphics = "0.8"
+embedded-hal = "1.0"

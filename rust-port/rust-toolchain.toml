@@ -1,0 +1,6 @@
+# The ESP32-C3 is a RISC-V core (riscv32imc) — fully supported on stable Rust.
+# No espup / xtensa toolchain required (that is only for the Xtensa ESP chips).
+[toolchain]
+channel = "stable"
+components = ["rust-src"]
+targets = ["riscv32imc-unknown-none-elf"]

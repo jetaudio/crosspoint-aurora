@@ -1,0 +1,19 @@
+[package]
+name = "crosspoint-core"
+version = "0.1.0"
+edition = "2021"
+description = "CrossPoint e-reader — pure no_std logic (drivers, parsers, layout, input)"
+license = "MIT"
+
+[lib]
+name = "crosspoint_core"
+path = "src/lib.rs"
+
+[dependencies]
+embedded-graphics = "0.8"
+embedded-hal = "1.0"
+heapless = "0.8"
+
+# `panic = "abort"` cannot be set for test/bench profiles that need unwinding,
+# so the workspace-root profiles intentionally omit it for `dev`/`test` host runs
+# via the explicit host target. Nothing to configure here.

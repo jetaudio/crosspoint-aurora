@@ -1,0 +1,28 @@
+# Workspace root for the CrossPoint Rust port.
+#
+#   core/      — pure no_std logic (pins, parsers, layout, input decode, the
+#                e-ink driver over embedded-hal traits). NO esp-hal dependency,
+#                so it builds and unit-tests on the host.
+#   firmware/  — the esp32-c3 binary: board bring-up, superloop, power. Depends
+#                on `core` and links esp-hal.
+#
+# Build firmware (default target is riscv, set in firmware/.cargo/config.toml):
+#   cargo build --release -p crosspoint-fw
+# Run the host tests for the ported logic:
+#   cargo test -p crosspoint-core --target x86_64-pc-windows-msvc
+[workspace]
+resolver = "2"
+members = ["core", "firmware"]
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = false
+overflow-checks = false
+panic = "abort"
+
+[profile.dev]
+opt-level = "s"
+debug = true
+panic = "abort"

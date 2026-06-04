@@ -1,0 +1,5 @@
+/target
+**/*.rs.bk
+*.bin
+# Cargo.lock IS committed — the esp-hal version set was hard-won (see README);
+# pin it for reproducible firmware builds.
