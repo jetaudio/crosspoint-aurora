@@ -1421,7 +1421,7 @@ std::string EpubReaderActivity::textRowName(int row) const {
 }
 
 std::string EpubReaderActivity::textRowValue(int row) const {
-  static constexpr StrId kFamily[] = {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS, StrId::STR_OPEN_DYSLEXIC};
+  static constexpr StrId kFamily[] = {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS};
   static constexpr StrId kSize[] = {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE};
   static constexpr StrId kSpacing[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
   static constexpr StrId kAlign[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER,
