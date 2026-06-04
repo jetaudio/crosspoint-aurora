@@ -41,6 +41,12 @@ static mut FRAMEBUFFER: [u8; pins::X4_BUFFER_SIZE] = [0; pins::X4_BUFFER_SIZE];
 const BOOK_BUF_SIZE: usize = 32 * 1024;
 static mut BOOK_BUF: [u8; BOOK_BUF_SIZE] = [0; BOOK_BUF_SIZE];
 
+/// Buffer a whole EPUB (ZIP) is read into before its first chapter is inflated
+/// into BOOK_BUF. 64 KB caps the EPUB size we can open in RAM; larger books need
+/// streaming (roadmap). Lives in `.bss`.
+const EPUB_BUF_SIZE: usize = 64 * 1024;
+static mut EPUB_BUF: [u8; EPUB_BUF_SIZE] = [0; EPUB_BUF_SIZE];
+
 /// Bring up the board and run the superloop forever.
 pub fn run(p: Peripherals) -> ! {
     let delay = Delay::new();
@@ -109,6 +115,7 @@ pub fn run(p: Peripherals) -> ! {
         line_height: 14,
     };
     let book_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(BOOK_BUF) };
+    let epub_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(EPUB_BUF) };
     let mut home = Menu::from_items(HOME_ITEMS);
     let mut browser = Menu::new();
     // The reader is created when a file is opened from the browser.
@@ -189,11 +196,27 @@ pub fn run(p: Peripherals) -> ! {
                             drop(reader.take());
                             let dev =
                                 RefCellDevice::new(&spi_bus, &mut sd_cs, delay).expect("SD device");
-                            let mut n = crate::sd::load_named(dev, delay, name, book_buf);
-                            // HTML/XHTML (incl. EPUB chapters) → strip to plain
-                            // text in place before paginating.
-                            if is_html(name) {
-                                n = crosspoint_core::parser::extract_text_inplace(book_buf, n);
+                            let mut n;
+                            if is_epub(name) {
+                                // EPUB: read the ZIP into epub_buf, extract the
+                                // first XHTML chapter into book_buf, then strip
+                                // tags to plain text.
+                                let raw = crate::sd::load_named(dev, delay, name, epub_buf);
+                                n = match crosspoint_core::archive::extract_first_html(
+                                    &epub_buf[..raw],
+                                    book_buf,
+                                ) {
+                                    Ok(html_len) => crosspoint_core::parser::extract_text_inplace(
+                                        book_buf, html_len,
+                                    ),
+                                    Err(_) => 0,
+                                };
+                            } else {
+                                n = crate::sd::load_named(dev, delay, name, book_buf);
+                                // HTML/XHTML → strip to plain text in place.
+                                if is_html(name) {
+                                    n = crosspoint_core::parser::extract_text_inplace(book_buf, n);
+                                }
                             }
                             let text: &[u8] = if n > 0 { &book_buf[..n] } else { SAMPLE_TEXT };
                             esp_println::println!("crosspoint-rs: open '{}' -> {} bytes", name, n);
@@ -269,10 +292,18 @@ fn adv6(_c: char) -> u16 {
 
 /// True if the filename looks like HTML/XHTML (case-insensitive extension).
 fn is_html(name: &str) -> bool {
-    let lower = name.rsplit('.').next().unwrap_or("");
-    lower.eq_ignore_ascii_case("html")
-        || lower.eq_ignore_ascii_case("htm")
-        || lower.eq_ignore_ascii_case("xhtml")
+    let ext = name.rsplit('.').next().unwrap_or("");
+    ext.eq_ignore_ascii_case("html")
+        || ext.eq_ignore_ascii_case("htm")
+        || ext.eq_ignore_ascii_case("xhtml")
+}
+
+/// True if the filename is an EPUB (a ZIP of XHTML).
+fn is_epub(name: &str) -> bool {
+    name.rsplit('.')
+        .next()
+        .unwrap_or("")
+        .eq_ignore_ascii_case("epub")
 }
 
 /// Dispatch a render to whichever screen is active.

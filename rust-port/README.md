@@ -122,18 +122,20 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Menu widget (owned strings) + 3-screen navigation | ✅ (host-tested) |
 | Shared SPI2 bus (display + SD via SpiDevice/RefCellDevice) | ✅ |
 | File browser lists the SD root + opens the selected file | ✅ from `SDCardManager.cpp` (needs on-HW speed check) |
-| HTML/XHTML → text extraction (in-place, EPUB chapter core) | ✅ (host-tested) |
+| HTML/XHTML → text extraction (in-place) | ✅ (host-tested) |
+| DEFLATE decompressor (zero-alloc, output-as-window) | ✅ (host-tested vs flate2) |
+| EPUB: ZIP container → inflate chapter → text → paginate | ✅ (host-tested; in-RAM ≤64 KB) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
-| EPUB ZIP container (the XHTML extraction itself works), Wi-Fi, settings | ⛔ roadmap |
+| Wi-Fi / Calibre wireless, settings UI | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
 1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
    scrolling the browser past a screenful of files (paged list).
 2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
    variable-width `advance` so wrapping matches proportional fonts).
-3. EPUB ZIP container: inflate + spine ordering, then feed each chapter through
-   the existing `parser::html::extract_text_inplace` (which already works).
+3. EPUB refinements: OPF spine ordering (multi-chapter reading order) and
+   streaming large EPUBs from SD instead of the 64 KB in-RAM cap.
 4. Persist the last-read position per book.
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Port the Aurora home layout (featured card + tab bar).

@@ -14,6 +14,11 @@ embedded-graphics = "0.8"
 embedded-hal = "1.0"
 heapless = "0.8"
 
+# Host-only: used by unit tests to generate DEFLATE vectors for the inflate
+# decompressor. Not part of the firmware build (no_std target ignores dev-deps).
+[dev-dependencies]
+flate2 = "1"
+
 # `panic = "abort"` cannot be set for test/bench profiles that need unwinding,
 # so the workspace-root profiles intentionally omit it for `dev`/`test` host runs
 # via the explicit host target. Nothing to configure here.
