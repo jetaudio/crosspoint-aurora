@@ -387,13 +387,16 @@ void FileBrowserActivity::render(RenderLock&&) {
   const int pathReserved = pathLineHeight + metrics.verticalSpacing;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - hintH - metrics.verticalSpacing - pathReserved - barH;
+  // The list sits level with the right-edge arrow hints (tab mode shows side Up/Down),
+  // so reserve that strip on the right — the same inset Settings/Library use.
+  const int rightInset = (tabMode && SETTINGS.showButtonHints) ? (metrics.sideButtonHintsWidth + 10) : 0;
   if (files.empty()) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else if (tabMode) {
     // Aurora "Browse" tab: two-line rows (name + type subtitle), like the design.
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
+        renderer, Rect{0, contentTop, pageWidth - rightInset, contentHeight}, files.size(), selectorIndex,
         [this](int index) { return getFileName(files[index]); },
         [this](int index) -> std::string {
           const std::string& f = files[index];

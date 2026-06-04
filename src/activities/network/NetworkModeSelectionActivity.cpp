@@ -3,6 +3,8 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <vector>
+
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/util/HomeTabBar.h"
@@ -85,11 +87,6 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
   const int barH = tabMode ? GUI.bottomBarHeight() : 0;
   const int hintH = (tabMode && !SETTINGS.showButtonHints) ? 0 : metrics.buttonHintsHeight;
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
-                 tabMode ? tr(STR_TAB_TRANSFER) : tr(STR_FILE_TRANSFER));
-
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - hintH - metrics.verticalSpacing * 2 - barH;
   // Menu items and descriptions
   static constexpr StrId menuItems[MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
                                                        StrId::STR_CREATE_HOTSPOT};
@@ -97,10 +94,30 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
                                                        StrId::STR_HOTSPOT_DESC};
   static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot};
 
-  GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,
-      [](int index) { return std::string(I18N.get(menuItems[index])); },
-      [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
+  const char* title = tabMode ? tr(STR_TAB_TRANSFER) : tr(STR_FILE_TRANSFER);
+
+  if (GUI.ownsSettingsLayout()) {
+    // Render the transfer options as a settings-style card list so this landing
+    // screen matches the Settings page. The ▸ chevron marks each entry as "opens".
+    std::vector<SettingsListItem> items;
+    items.reserve(MENU_ITEM_COUNT);
+    for (int i = 0; i < MENU_ITEM_COUNT; ++i) {
+      SettingsListItem it;
+      it.text = I18N.get(menuItems[i]);
+      it.selected = (i == selectedIndex);
+      it.showChevron = true;
+      items.push_back(it);
+    }
+    GUI.drawSettingsScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintH - barH}, title, items);
+  } else {
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title);
+    const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+    const int contentHeight = pageHeight - contentTop - hintH - metrics.verticalSpacing * 2 - barH;
+    GUI.drawList(
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,
+        [](int index) { return std::string(I18N.get(menuItems[index])); },
+        [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
+  }
 
   // Draw help text at bottom
   if (tabMode) {

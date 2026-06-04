@@ -68,6 +68,41 @@ const uint8_t* barIconBitmap(UIIcon icon) {
 }
 }  // namespace
 
+int AuroraTheme::drawHeaderBar(const GfxRenderer& renderer, int x, int top, int width, const char* title) const {
+  const auto& metrics = AuroraMetrics::values;
+  const int P = metrics.contentSidePadding;
+  const int textY = top + kStatusY;
+
+  // Title (left, large + bold), truncated so a long name (e.g. a folder path) can't
+  // run into the battery on the right.
+  if (title != nullptr) {
+    const int rightReserve = P + metrics.batteryWidth + 52;  // battery icon + "NN%"
+    const int maxW = std::max(20, (x + width - rightReserve) - (x + P));
+    const auto t = renderer.truncatedText(kTitleFontId, title, maxW, EpdFontFamily::BOLD);
+    renderer.drawText(kTitleFontId, x + P, textY, t.c_str(), true, EpdFontFamily::BOLD);
+  }
+
+  // Clock (center, X3 only — the X4 has no RTC).
+  if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
+    char timeBuf[9];
+    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
+      renderer.drawCenteredText(kCaptionFontId, textY, timeBuf);
+    }
+  }
+
+  // Battery (right).
+  const bool showBatteryPercentage =
+      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
+  drawBatteryRight(renderer,
+                   Rect{x + width - P - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
+                   showBatteryPercentage);
+
+  // Divider rule below the status text, inset by the content side padding.
+  const int dividerY = textY + kDividerGap;
+  renderer.drawLine(x + P, dividerY, x + width - P, dividerY);
+  return dividerY;
+}
+
 void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std::vector<RecentBook>& recentBooks,
                                  const std::vector<std::string>& barLabels, const std::vector<UIIcon>& barIcons,
                                  int listSelected, int activeTab) const {
@@ -75,24 +110,8 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: page title (left, large+bold), clock (center, X3 only), battery (right) ---
-  renderer.drawText(kTitleFontId, P, kStatusY, tr(STR_LIBRARY), true, EpdFontFamily::BOLD);
-
-  if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
-    char timeBuf[9];
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
-      renderer.drawCenteredText(kCaptionFontId, kStatusY, timeBuf);
-    }
-  }
-
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = W - P - metrics.batteryWidth;
-  drawBatteryRight(renderer, Rect{batteryX, kStatusY, metrics.batteryWidth, metrics.batteryHeight},
-                   showBatteryPercentage);
-
-  const int dividerY = kStatusY + kDividerGap;
-  renderer.drawLine(P, dividerY, W - P, dividerY);
+  // --- Status bar: page title (left), clock (center, X3 only), battery (right), divider ---
+  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, tr(STR_LIBRARY));
 
   // --- "Now Reading" featured card (recentBooks[0]) ---
   const int labelY = dividerY + 14;
@@ -163,10 +182,13 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   // --- "Recent Books" header + recent-books list (books only; nav lives in the bottom bar) ---
   // The page title is now "Library", so this in-content section uses "Recent Books"
   // to avoid showing "Library" twice on the same screen.
+  // The list sits level with the right-edge arrow hints, so reserve that strip when
+  // hints are shown (same inset the settings list uses) to avoid overlap.
+  const int rightInset = SETTINGS.showButtonHints ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
   renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
   const int underlineY = libHeaderY + renderer.getLineHeight(kHeaderFontId) + 4;
-  renderer.drawLine(P, underlineY, W - P, underlineY);
+  renderer.drawLine(P, underlineY, W - P - rightInset, underlineY);
 
   const int barTop = content.height - kBottomBarHeight;
   const int listTop = underlineY + 12;
@@ -177,7 +199,7 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int listHeight = std::max(0, barTop - listTop);
 
   drawList(
-      renderer, Rect{0, listTop, W, listHeight}, libBookCount, librarySelected,
+      renderer, Rect{0, listTop, W - rightInset, listHeight}, libBookCount, librarySelected,
       [&recentBooks, featuredOffset](int i) { return recentBooks[featuredOffset + i].title; }, nullptr,
       [](int) -> UIIcon { return Book; });
 
@@ -223,27 +245,18 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: title (left, large+bold), clock (X3 only), battery (right), divider ---
-  renderer.drawText(kTitleFontId, P, kStatusY, title, true, EpdFontFamily::BOLD);
-  if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
-    char timeBuf[9];
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
-      renderer.drawCenteredText(kCaptionFontId, kStatusY, timeBuf);
-    }
-  }
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  drawBatteryRight(renderer, Rect{W - P - metrics.batteryWidth, kStatusY, metrics.batteryWidth, metrics.batteryHeight},
-                   showBatteryPercentage);
-  const int dividerY = kStatusY + kDividerGap;
-  renderer.drawLine(P, dividerY, W - P, dividerY);
+  // --- Status bar: title (left), clock (X3 only), battery (right), divider ---
+  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, title);
 
   // --- Flat, section-grouped value list (no category pills) ---
   const int listTop = dividerY + 10;
   const int listBottom = content.y + content.height;
   const int listHeight = std::max(0, listBottom - listTop);
   const int rowH = kSettingRowHeight;
-  const int headerH = 28;
+  // Section-header band: the label sits near the top (kHeaderTextTop) and the rest
+  // is breathing room before the group's card, so names don't crowd their options.
+  const int headerH = 38;
+  constexpr int kHeaderTextTop = 10;
   const int rightInset = SETTINGS.showButtonHints ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int rowLeft = P - 4;
   const int rowRight = W - (P - 4) - rightInset;
@@ -329,7 +342,7 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
     if (y + itemH(i) > listBottom) break;
 
     if (items[i].isHeader) {
-      renderer.drawText(kCaptionFontId, P + 2, y + 8, items[i].text.c_str(), true, EpdFontFamily::BOLD);
+      renderer.drawText(kCaptionFontId, P + 2, y + kHeaderTextTop, items[i].text.c_str(), true, EpdFontFamily::BOLD);
       y += headerH;
       ++i;
       continue;
@@ -357,30 +370,17 @@ void AuroraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char*
   const auto& m = AuroraMetrics::values;
   const int P = m.contentSidePadding;
 
-  // Battery (right), like the Aurora home/settings status bar.
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  drawBatteryRight(renderer,
-                   Rect{rect.x + rect.width - P - m.batteryWidth, rect.y + 8, m.batteryWidth, m.batteryHeight},
-                   showBatteryPercentage);
+  // Route through the shared status bar so the title, battery and divider match the
+  // home/settings screens exactly. Callers pass rect.y = topPadding, so the band
+  // top is rect.y - topPadding (the screen top), giving the same divider position
+  // and inset length as every other page.
+  const int dividerY = drawHeaderBar(renderer, rect.x, rect.y - m.topPadding, rect.width, title);
 
-  // Title (left, bold) — Aurora uses a left-aligned status-bar title, not centered.
-  if (title != nullptr) {
-    const int titleY = rect.y + (rect.height - renderer.getLineHeight(kTitleFontId)) / 2;
-    const int rightReserve = P + m.batteryWidth + 52;  // battery icon + "NN%"
-    const int maxW = std::max(20, (rect.x + rect.width - rightReserve) - (rect.x + P));
-    const auto t = renderer.truncatedText(kTitleFontId, title, maxW, EpdFontFamily::BOLD);
-    renderer.drawText(kTitleFontId, rect.x + P, titleY, t.c_str(), true, EpdFontFamily::BOLD);
-  }
-
-  // Divider rule at the bottom of the header band.
-  renderer.drawLine(rect.x, rect.y + rect.height, rect.x + rect.width, rect.y + rect.height);
-
-  // Optional subtitle (rare): small, right-aligned just under the header.
+  // Optional subtitle (rare): small, right-aligned just under the divider.
   if (subtitle != nullptr) {
     const auto s = renderer.truncatedText(SMALL_FONT_ID, subtitle, rect.width - P * 2, EpdFontFamily::REGULAR);
     const int sw = renderer.getTextWidth(SMALL_FONT_ID, s.c_str());
-    renderer.drawText(SMALL_FONT_ID, rect.x + rect.width - P - sw, rect.y + rect.height + 5, s.c_str(), true);
+    renderer.drawText(SMALL_FONT_ID, rect.x + rect.width - P - sw, dividerY + 5, s.c_str(), true);
   }
 }
 
@@ -470,6 +470,53 @@ void AuroraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount
   }
 }
 
+void AuroraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
+  // Governed by the same user toggle as the front button hint row.
+  if (!SETTINGS.showButtonHints) return;
+
+  // Same box positions/height as the base theme (they line up with the physical
+  // side buttons); Aurora only narrows the strip and swaps the rotated "Up"/"Down"
+  // text for filled up/down arrows.
+  const int boxW = AuroraMetrics::values.sideButtonHintsWidth;  // slim strip (24px)
+  constexpr int boxH = 80;                                      // matches the physical button extent
+  constexpr int margin = 4;
+  const int screenW = renderer.getScreenWidth();
+
+  const bool showTop = topBtn != nullptr && topBtn[0] != '\0';
+  const bool showBottom = bottomBtn != nullptr && bottomBtn[0] != '\0';
+
+  // A box with a filled up/down triangle centred in it.
+  auto drawArrowBox = [&](int x, int y, bool up) {
+    renderer.drawRect(x, y, boxW, boxH);
+    const int cx = x + boxW / 2;
+    const int cy = y + boxH / 2;
+    constexpr int half = 6;  // arrowhead half-width
+    constexpr int tall = 7;  // arrowhead half-height
+    if (up) {
+      int xs[3] = {cx, cx - half, cx + half};
+      int ys[3] = {cy - tall, cy + tall, cy + tall};
+      renderer.fillPolygon(xs, ys, 3, true);
+    } else {
+      int xs[3] = {cx - half, cx + half, cx};
+      int ys[3] = {cy - tall, cy - tall, cy + tall};
+      renderer.fillPolygon(xs, ys, 3, true);
+    }
+  };
+
+  if (gpio.deviceIsX3()) {
+    // X3: Up box on the left edge, Down box on the right edge.
+    constexpr int y = 155;
+    if (showTop) drawArrowBox(margin, y, true);
+    if (showBottom) drawArrowBox(screenW - margin - boxW, y, false);
+  } else {
+    // X4: both boxes stacked on the right edge.
+    constexpr int topY = 345;
+    const int x = screenW - margin - boxW;
+    if (showTop) drawArrowBox(x, topY, true);
+    if (showBottom) drawArrowBox(x, topY + boxH, false);
+  }
+}
+
 void AuroraTheme::drawReaderToolbar(GfxRenderer& renderer, Rect screen, const ReaderToolbarInfo& info) const {
   const int X = screen.x;
   const int Y = screen.y;
@@ -492,19 +539,21 @@ void AuroraTheme::drawReaderToolbar(GfxRenderer& renderer, Rect screen, const Re
   chevron(X + 26, Y + topH / 2, 8, true);
 
   if (info.bookTitle != nullptr) {
-    const auto t = renderer.truncatedText(kTitleFontId, info.bookTitle, W - 120, EpdFontFamily::BOLD);
+    // Reserve room on the right for the battery (and a focus dot) so the centred
+    // title can't run under them.
+    const auto t = renderer.truncatedText(kTitleFontId, info.bookTitle, W - 160, EpdFontFamily::BOLD);
     const int th = renderer.getLineHeight(kTitleFontId);
     renderer.drawCenteredText(kTitleFontId, Y + (topH - th) / 2, t.c_str(), true, EpdFontFamily::BOLD);
   }
 
-  // Focus-reading indicator: a small ring, filled when focus reading is on.
-  const int fz = 16;
-  const int fx = X + W - 26;
-  const int fy = Y + topH / 2;
-  renderer.drawRoundedRect(fx - fz / 2, fy - fz / 2, fz, fz, 1, fz / 2, true);
-  if (info.focusReadingOn) {
-    renderer.fillRoundedRect(fx - 3, fy - 3, 6, 6, 3, Color::Black);
-  }
+  // Battery (right), matching the status bar shown on every other screen (replaces
+  // the old focus-reading ring; focus state still lives in the Text tool).
+  const auto& m = AuroraMetrics::values;
+  const bool showBatteryPercentage =
+      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
+  const int batteryY = Y + (topH - m.batteryHeight) / 2;
+  drawBatteryRight(renderer, Rect{X + W - pad - m.batteryWidth, batteryY, m.batteryWidth, m.batteryHeight},
+                   showBatteryPercentage);
 
   // --- Bottom bar: scrub row, meta row, tool row ---
   const int bottomH = 160;
@@ -530,7 +579,9 @@ void AuroraTheme::drawReaderToolbar(GfxRenderer& renderer, Rect screen, const Re
   renderer.fillRoundedRect(knobX - 6, trackY - 6, 12, 12, 6, Color::Black);
 
   // Meta row: chapter title (left), chapter page X/Y + book percent (right).
-  const int my = by + 64;
+  // Sit nearer the scrub row so the title isn't crowded against the tool-row rule
+  // below it (the scrub→meta gap had slack to spare).
+  const int my = by + 58;
   renderer.drawLine(X + 16, my, X + W - 16, my);
   if (info.chapterTitle != nullptr && info.chapterTitle[0] != '\0') {
     const auto ch = renderer.truncatedText(kCaptionFontId, info.chapterTitle, W / 2 - pad, EpdFontFamily::BOLD);

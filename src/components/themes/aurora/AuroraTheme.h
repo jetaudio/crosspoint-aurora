@@ -18,6 +18,9 @@ constexpr ThemeMetrics values = [] {
   // The NotoSans UI font is taller than the old Ubuntu one; give subtitle rows
   // (bookmarks, recent books, ...) a little more height so title + subtitle fit.
   v.listWithSubtitleRowHeight = 56;
+  // Slim arrow edge-hints (drawSideButtonHints): a narrower strip than the base
+  // theme's 30px text boxes, so less of the page is reserved on the right.
+  v.sideButtonHintsWidth = 24;
   return v;
 }();
 }  // namespace AuroraMetrics
@@ -57,4 +60,18 @@ class AuroraTheme : public BaseTheme {
                 const std::function<UIIcon(int index)>& rowIcon = nullptr,
                 const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                 const std::function<bool(int index)>& rowDimmed = nullptr) const override;
+
+  // Slim edge-button hints: two small boxes on the right edge (X4) / sides (X3),
+  // each holding an up/down arrow glyph instead of rotated "Up"/"Down" text.
+  void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;
+
+ private:
+  // Draws the shared Aurora status bar — page title (left, bold), optional clock
+  // (X3 only), battery (right) and the divider rule beneath — into the band whose
+  // top edge is `top`, spanning [x, x + width). The title sits kStatusY below the
+  // band top and the divider kDividerGap below the title, inset by the content side
+  // padding. Returns the divider's Y so callers can lay out the page body below it.
+  // Every page (home, settings, file browser, recent books, ...) routes through
+  // this so the separator's length and spacing are identical across screens.
+  int drawHeaderBar(const GfxRenderer& renderer, int x, int top, int width, const char* title) const;
 };
