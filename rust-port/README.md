@@ -117,6 +117,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Battery % curve + status-bar read (GPIO0, calibrated) | ✅ from `BatteryMonitor.cpp` (host-tested) |
 | Aurora-style status bar (title + battery + divider) | ✅ from `AuroraTheme::drawHeaderBar` |
 | Aurora home: featured card + library list + tab bar + two-zone nav | ✅ (state machine host-tested) |
+| Settings screen (line spacing / margin → reader layout) | ✅ (host-tested; in-memory) |
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
@@ -141,6 +142,7 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
    streaming large EPUBs from SD instead of the 64 KB in-RAM cap.
 4. Persist the last-read position per book.
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
-5. Settings / File-Transfer tab screens (the tabs render + navigate; their
-   destination screens are stubs).
+5. Persist settings to the SD card (the in-memory Settings screen works); the
+   File-Transfer tab (needs Wi-Fi, below).
 6. X3 variant (UC81xx) display path.
+7. Wi-Fi / Calibre wireless (esp-wifi) — needs on-hardware validation.

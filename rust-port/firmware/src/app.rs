@@ -30,7 +30,9 @@ use crosspoint_core::driver::{Eink, RefreshMode};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
 use crosspoint_core::layout::PageMetrics;
 use crosspoint_core::pins;
-use crosspoint_core::ui::{self, AuroraHome, Event, HomeAction, Menu, Reader, Zone, TAB_LABELS};
+use crosspoint_core::ui::{
+    self, AuroraHome, Event, HomeAction, Menu, Reader, Settings, Zone, TAB_LABELS,
+};
 
 /// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
 /// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
@@ -106,15 +108,10 @@ pub fn run(p: Peripherals) -> ! {
     // Power button (GPIO3, active low). Held long here would trigger power_off.
     let power_btn = Input::new(p.GPIO3, InputConfig::default().with_pull(Pull::Up));
 
-    // ── Screens: Home menu + the Reader ──────────────────────────────────────
-    // FONT_6X10 is a fixed 6 px-wide cell, so the wrap advance is a constant 6.
-    let reader_metrics = PageMetrics {
-        width: pins::X4_WIDTH,
-        height: pins::X4_HEIGHT,
-        margin_x: 16,
-        margin_y: 34, // leaves a title strip at the top
-        line_height: 14,
-    };
+    // Reader settings (line spacing / margin); the reader's PageMetrics are
+    // derived from these at open time. FONT_6X10 is a fixed 6 px-wide cell, so
+    // the wrap advance is a constant 6.
+    let mut settings = Settings::new();
     let book_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(BOOK_BUF) };
     let epub_buf: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(EPUB_BUF) };
 
@@ -146,7 +143,14 @@ pub fn run(p: Peripherals) -> ! {
     };
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_active(&mut eink, active, &home, reader.as_ref(), battery_pct);
+    draw_active(
+        &mut eink,
+        active,
+        &home,
+        &settings,
+        reader.as_ref(),
+        battery_pct,
+    );
     eink.display(RefreshMode::Full, false);
 
     // ── Superloop ────────────────────────────────────────────────────────────
@@ -215,7 +219,7 @@ pub fn run(p: Peripherals) -> ! {
                                     name,
                                     n
                                 );
-                                reader = Some(Reader::new(text, reader_metrics, adv6));
+                                reader = Some(Reader::new(text, metrics_from(&settings), adv6));
                                 active = Active::Reader;
                                 (true, true)
                             } else {
@@ -223,13 +227,30 @@ pub fn run(p: Peripherals) -> ! {
                             }
                         }
                         HomeAction::OpenTab(t) => {
-                            // Browse/Recent focus the library; Settings/Transfer
-                            // are not yet ported (logged, redraw to show focus).
+                            // Browse/Recent focus the library; Settings opens the
+                            // settings screen; Transfer is not yet ported.
                             esp_println::println!("crosspoint-rs: tab {}", TAB_LABELS[t]);
-                            (true, false)
+                            if t == 2 {
+                                active = Active::Settings;
+                                (true, true)
+                            } else {
+                                (true, false)
+                            }
                         }
                         HomeAction::None => (false, false),
                     },
+                    _ => (false, false),
+                },
+                // Settings: Up/Down select a field, Left/Right adjust it.
+                Active::Settings => match event {
+                    Some(Event::Up) => (settings.up(), false),
+                    Some(Event::Down) => (settings.down(), false),
+                    Some(Event::PrevPage) => (settings.dec(), false),
+                    Some(Event::NextPage) => (settings.inc(), false),
+                    Some(Event::Back) => {
+                        active = Active::Home;
+                        (true, true)
+                    }
                     _ => (false, false),
                 },
                 Active::Reader => match (event, reader.as_mut()) {
@@ -251,7 +272,14 @@ pub fn run(p: Peripherals) -> ! {
                     };
                     crosspoint_core::battery::percentage_from_adc_millivolts(mv)
                 };
-                draw_active(&mut eink, active, &home, reader.as_ref(), battery_pct);
+                draw_active(
+                    &mut eink,
+                    active,
+                    &home,
+                    &settings,
+                    reader.as_ref(),
+                    battery_pct,
+                );
                 let mode = if screen_change {
                     RefreshMode::Full
                 } else {
@@ -275,7 +303,19 @@ pub fn run(p: Peripherals) -> ! {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Active {
     Home,
+    Settings,
     Reader,
+}
+
+/// Derive the reader's page metrics from the current settings.
+fn metrics_from(s: &Settings) -> PageMetrics {
+    PageMetrics {
+        width: pins::X4_WIDTH,
+        height: pins::X4_HEIGHT,
+        margin_x: s.margin(),
+        margin_y: 34, // leaves the status-bar strip at the top
+        line_height: s.line_height(),
+    }
 }
 
 /// Library entry shown when no SD card / files are present; opens the sample.
@@ -307,6 +347,7 @@ fn draw_active<D>(
     target: &mut D,
     active: Active,
     home: &AuroraHome,
+    settings: &Settings,
     reader: Option<&Reader>,
     pct: u8,
 ) where
@@ -314,12 +355,48 @@ fn draw_active<D>(
 {
     match active {
         Active::Home => draw_home(target, home, pct),
+        Active::Settings => draw_settings(target, settings, pct),
         Active::Reader => {
             if let Some(r) = reader {
                 draw_reader(target, r, pct);
             }
         }
     }
+}
+
+/// Render the settings screen: each field as "Label  < value >", caret on the
+/// selected row.
+fn draw_settings<D>(target: &mut D, settings: &Settings, pct: u8)
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let _ = target.clear(BinaryColor::Off); // white
+    draw_status_bar(target, "Settings", pct);
+
+    let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
+    let mut y = 70i32;
+    for i in 0..crosspoint_core::ui::settings::SETTING_COUNT {
+        let caret = if i == settings.cursor() { ">" } else { " " };
+        let mut line: heapless::String<48> = heapless::String::new();
+        let _ = write!(
+            line,
+            "{} {}   < {} >",
+            caret,
+            settings.label(i),
+            settings.value(i)
+        );
+        let _ = Text::with_baseline(&line, Point::new(24, y), style, Baseline::Top).draw(target);
+        y += 28;
+    }
+
+    let hint = "Up/Down: select   Left/Right: adjust   Back: home";
+    let _ = Text::with_baseline(
+        hint,
+        Point::new(24, pins::X4_HEIGHT as i32 - 24),
+        style,
+        Baseline::Top,
+    )
+    .draw(target);
 }
 
 /// Aurora-style slim status bar: page title (left, bold), battery % (right), and

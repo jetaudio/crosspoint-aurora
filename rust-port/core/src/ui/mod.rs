@@ -6,10 +6,12 @@
 pub mod aurora_home;
 pub mod menu;
 pub mod reader;
+pub mod settings;
 
 pub use aurora_home::{AuroraHome, HomeAction, Zone, TAB_LABELS};
 pub use menu::Menu;
 pub use reader::Reader;
+pub use settings::Settings;
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
