@@ -4,7 +4,10 @@
 //! loop polling input and re-rendering on demand. All hardware wiring uses the
 //! exact pins from `discovered_pins.md`.
 
+use core::cell::RefCell;
 use core::fmt::Write as _;
+
+use embedded_hal_bus::spi::RefCellDevice;
 
 use embedded_graphics::mono_font::ascii::{FONT_10X20, FONT_6X10};
 use embedded_graphics::mono_font::MonoTextStyle;
@@ -43,10 +46,12 @@ pub fn run(p: Peripherals) -> ! {
     let rst = Output::new(p.GPIO5, Level::High, OutputConfig::default());
     let busy = Input::new(p.GPIO6, InputConfig::default().with_pull(Pull::None));
 
-    // Deselect the SD card so it stays off the shared SPI bus (CS idle high).
-    let _sd_cs = Output::new(p.GPIO12, Level::High, OutputConfig::default());
+    // SD card chip-select on the shared bus (idle high = deselected).
+    let sd_cs = Output::new(p.GPIO12, Level::High, OutputConfig::default());
 
     // ── Shared SPI bus: SCLK=8, MOSI=10, MISO=7, Mode 0, 40 MHz ─────────────
+    // The display and SD card share SPI2; each gets a RefCellDevice with its own
+    // CS so only one is asserted at a time.
     let spi = Spi::new(
         p.SPI2,
         SpiConfig::default()
@@ -57,13 +62,15 @@ pub fn run(p: Peripherals) -> ! {
     .with_sck(p.GPIO8)
     .with_mosi(p.GPIO10)
     .with_miso(p.GPIO7);
+    let spi_bus: RefCell<_> = RefCell::new(spi);
+    let display_dev = RefCellDevice::new(&spi_bus, cs, delay).expect("display SPI device");
+    let _sd_dev = RefCellDevice::new(&spi_bus, sd_cs, delay).expect("SD SPI device");
 
-    // ── E-ink driver ─────────────────────────────────────────────────────────
+    // ── E-ink driver (over its shared SPI device) ────────────────────────────
     let fb: &'static mut [u8] = unsafe { &mut *core::ptr::addr_of_mut!(FRAMEBUFFER) };
     let mut eink = Eink::new(
-        spi,
+        display_dev,
         dc,
-        cs,
         rst,
         busy,
         delay,

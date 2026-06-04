@@ -18,7 +18,7 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::{InputPin, OutputPin};
-use embedded_hal::spi::SpiBus;
+use embedded_hal::spi::SpiDevice;
 
 // ── SSD1677 command set (from EInkDisplay.cpp:8-41) ──────────────────────────
 const CMD_SOFT_RESET: u8 = 0x12;
@@ -56,15 +56,19 @@ pub enum RefreshMode {
     Full,
 }
 
-/// SSD1677 driver bound to one SPI bus + the five control GPIOs and a delay.
+/// SSD1677 driver bound to one SPI **device** (CS managed by the device, so the
+/// bus can be shared with the SD card) + the DC/RST/BUSY GPIOs and a delay.
+///
+/// Each command/data write is its own SpiDevice transaction (CS asserted for the
+/// write, released after), which matches the original C++ that toggles CS per
+/// `sendCommand`/`sendData`. DC is changed between transactions, while CS is high.
 ///
 /// `fb` is the 1bpp framebuffer (`X4_BUFFER_SIZE` bytes, 0xFF = white). It is
 /// borrowed `'static` so the large 48 KB buffer lives in a `static`, never on
 /// the stack.
-pub struct Eink<SPI, DC, CS, RST, BUSY, DELAY> {
+pub struct Eink<SPI, DC, RST, BUSY, DELAY> {
     spi: SPI,
     dc: DC,
-    cs: CS,
     rst: RST,
     busy: BUSY,
     delay: DELAY,
@@ -74,11 +78,10 @@ pub struct Eink<SPI, DC, CS, RST, BUSY, DELAY> {
     screen_on: bool,
 }
 
-impl<SPI, DC, CS, RST, BUSY, DELAY> Eink<SPI, DC, CS, RST, BUSY, DELAY>
+impl<SPI, DC, RST, BUSY, DELAY> Eink<SPI, DC, RST, BUSY, DELAY>
 where
-    SPI: SpiBus<u8>,
+    SPI: SpiDevice<u8>,
     DC: OutputPin,
-    CS: OutputPin,
     RST: OutputPin,
     BUSY: InputPin,
     DELAY: DelayNs,
@@ -87,7 +90,6 @@ where
     pub fn new(
         spi: SPI,
         dc: DC,
-        cs: CS,
         rst: RST,
         busy: BUSY,
         delay: DELAY,
@@ -98,7 +100,6 @@ where
         Self {
             spi,
             dc,
-            cs,
             rst,
             busy,
             delay,
@@ -114,25 +115,21 @@ where
     }
 
     // ── Low-level SPI primitives (EInkDisplay.cpp:588-613) ───────────────────
+    // The SpiDevice asserts/releases CS around each `write`; DC selects
+    // command (low) vs data (high) and is set while CS is idle high.
     fn send_command(&mut self, cmd: u8) {
         let _ = self.dc.set_low(); // command mode
-        let _ = self.cs.set_low();
         let _ = self.spi.write(&[cmd]);
-        let _ = self.cs.set_high();
     }
 
     fn send_data(&mut self, data: u8) {
         let _ = self.dc.set_high(); // data mode
-        let _ = self.cs.set_low();
         let _ = self.spi.write(&[data]);
-        let _ = self.cs.set_high();
     }
 
     fn send_data_bulk(&mut self, data: &[u8]) {
         let _ = self.dc.set_high();
-        let _ = self.cs.set_low();
         let _ = self.spi.write(data);
-        let _ = self.cs.set_high();
     }
 
     /// X4: BUSY is held HIGH while busy, drops LOW when done (EInkDisplay.cpp:550).
@@ -230,13 +227,11 @@ where
 
     fn write_ram(&mut self, ram_cmd: u8) {
         self.send_command(ram_cmd);
-        // Borrow-splitting: take the fb pointer out, write, put back. Safe because
-        // send_data_bulk only touches spi/dc/cs, never fb.
+        // Bulk plane write. `self.spi.write` only borrows spi/fb disjointly, so a
+        // direct slice of the framebuffer is fine.
         let len = self.buffer_size();
         let _ = self.dc.set_high();
-        let _ = self.cs.set_low();
         let _ = self.spi.write(&self.fb[..len]);
-        let _ = self.cs.set_high();
     }
 
     /// Push the framebuffer to the panel and refresh
@@ -327,13 +322,13 @@ where
 
 // ── embedded-graphics integration ────────────────────────────────────────────
 
-impl<SPI, DC, CS, RST, BUSY, DELAY> OriginDimensions for Eink<SPI, DC, CS, RST, BUSY, DELAY> {
+impl<SPI, DC, RST, BUSY, DELAY> OriginDimensions for Eink<SPI, DC, RST, BUSY, DELAY> {
     fn size(&self) -> Size {
         Size::new(self.width as u32, self.height as u32)
     }
 }
 
-impl<SPI, DC, CS, RST, BUSY, DELAY> DrawTarget for Eink<SPI, DC, CS, RST, BUSY, DELAY> {
+impl<SPI, DC, RST, BUSY, DELAY> DrawTarget for Eink<SPI, DC, RST, BUSY, DELAY> {
     type Color = BinaryColor;
     type Error = core::convert::Infallible;
 
