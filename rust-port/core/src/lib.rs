@@ -15,6 +15,7 @@ pub mod archive;
 pub mod battery;
 pub mod compress;
 pub mod driver;
+pub mod glyphfont;
 pub mod input;
 pub mod layout;
 pub mod parser;

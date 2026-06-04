@@ -18,8 +18,26 @@ pub struct FontHeader {
 /// Expected little-endian magic ("XF" = 0x4658) — adjust to the real tool value.
 pub const FONT_MAGIC: u16 = 0x4658;
 
-const HEADER_LEN: usize = 12;
-const GLYPH_RECORD_LEN: usize = 8;
+pub(crate) const HEADER_LEN: usize = 12;
+pub(crate) const GLYPH_RECORD_LEN: usize = 8;
+
+/// Byte offset where the bitmap blob begins (just after the glyph metrics table).
+pub(crate) fn bitmap_blob_start(header: &FontHeader) -> usize {
+    HEADER_LEN + header.glyph_count as usize * GLYPH_RECORD_LEN
+}
+
+/// Number of bytes in a glyph's 1bpp bitmap (`ceil(width/8) * height`).
+pub fn glyph_bitmap_len(m: &GlyphMetrics) -> usize {
+    ((m.width as usize) + 7) / 8 * m.height as usize
+}
+
+/// The glyph's 1bpp bitmap rows (MSB-first, set bit = ink), or `None` if the
+/// blob is truncated.
+pub fn glyph_bitmap<'a>(buf: &'a [u8], header: &FontHeader, m: &GlyphMetrics) -> Option<&'a [u8]> {
+    let start = bitmap_blob_start(header) + m.bitmap_offset as usize;
+    let len = glyph_bitmap_len(m);
+    buf.get(start..start + len)
+}
 
 fn rd_u16(buf: &[u8], at: usize) -> Option<u16> {
     let b = buf.get(at..at + 2)?;

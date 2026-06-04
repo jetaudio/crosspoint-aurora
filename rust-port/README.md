@@ -126,14 +126,15 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | DEFLATE decompressor (zero-alloc, output-as-window) | ✅ (host-tested vs flate2) |
 | EPUB: ZIP container → inflate chapter → text → paginate | ✅ (host-tested; in-RAM ≤64 KB) |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
+| `.bin` bitmap-font renderer (variable-width, DrawTarget) | ✅ (host-tested; awaits a font asset) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
 | Wi-Fi / Calibre wireless, settings UI | ⛔ roadmap |
 
 ## Roadmap (next ports, in rough order)
 1. SD init bus-speed split (≤400 kHz init, then 40 MHz) if real cards need it;
    scrolling the browser past a screenful of files (paged list).
-2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
-   variable-width `advance` so wrapping matches proportional fonts).
+2. Ship a `.bin` font asset and switch the reader to `glyphfont` (the renderer
+   and variable-width `advance` are done — see `core/glyphfont.rs`).
 3. EPUB refinements: OPF spine ordering (multi-chapter reading order) and
    streaming large EPUBs from SD instead of the 64 KB in-RAM cap.
 4. Persist the last-read position per book.
