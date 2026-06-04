@@ -3,10 +3,10 @@
 //! Mirrors the C++ firmware's screen model at a small scale — logical `Event`s
 //! decoded from physical buttons, driving a screen (currently the `Reader`).
 
-pub mod home;
+pub mod menu;
 pub mod reader;
 
-pub use home::Home;
+pub use menu::Menu;
 pub use reader::Reader;
 
 use embedded_graphics::mono_font::MonoTextStyle;

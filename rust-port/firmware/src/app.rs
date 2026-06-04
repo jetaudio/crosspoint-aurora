@@ -26,7 +26,7 @@ use crosspoint_core::driver::{Eink, RefreshMode};
 use crosspoint_core::input::{decode_group1, decode_group2, ButtonState};
 use crosspoint_core::layout::PageMetrics;
 use crosspoint_core::pins;
-use crosspoint_core::ui::{self, Event, Home, Reader};
+use crosspoint_core::ui::{self, Event, Menu, Reader};
 
 /// 1bpp framebuffer for the SSD1677 (48 KB). Zero-initialised so it lands in
 /// `.bss` (no 48 KB of flash init data); `Eink::init` fills it with 0xFF before
@@ -96,7 +96,8 @@ pub fn run(p: Peripherals) -> ! {
         line_height: 14,
     };
     let mut reader = Reader::new(SAMPLE_TEXT, reader_metrics, adv6);
-    let mut home = Home::new(HOME_ITEMS);
+    let mut home = Menu::new(HOME_ITEMS);
+    let mut browser = Menu::new(FILE_ITEMS);
     let mut active = Active::Home;
 
     // Read the battery once at boot; refreshed on each redraw below. With curve
@@ -111,7 +112,7 @@ pub fn run(p: Peripherals) -> ! {
     };
 
     // ── First render ─────────────────────────────────────────────────────────
-    draw_active(&mut eink, active, &home, &reader);
+    draw_active(&mut eink, active, &home, &browser, &reader);
     draw_battery(&mut eink, battery_pct);
     eink.display(RefreshMode::Full, false);
 
@@ -141,9 +142,24 @@ pub fn run(p: Peripherals) -> ! {
                 Active::Home => match event {
                     Some(Event::Up) => (home.up(), false),
                     Some(Event::Down) => (home.down(), false),
-                    // Item 0 ("Open book") opens the reader; others are no-ops.
+                    // Item 0 ("Open book") opens the file browser; else no-op.
                     Some(Event::Select) if home.selected() == 0 => {
+                        active = Active::Browser;
+                        (true, true)
+                    }
+                    _ => (false, false),
+                },
+                Active::Browser => match event {
+                    Some(Event::Up) => (browser.up(), false),
+                    Some(Event::Down) => (browser.down(), false),
+                    // Selecting a file opens it in the reader. (Every entry maps
+                    // to the bundled sample until SD-card loading is wired up.)
+                    Some(Event::Select) => {
                         active = Active::Reader;
+                        (true, true)
+                    }
+                    Some(Event::Back) => {
+                        active = Active::Home;
                         (true, true)
                     }
                     _ => (false, false),
@@ -152,7 +168,7 @@ pub fn run(p: Peripherals) -> ! {
                     Some(Event::NextPage) => (reader.next_page(), false),
                     Some(Event::PrevPage) => (reader.prev_page(), false),
                     Some(Event::Back) => {
-                        active = Active::Home;
+                        active = Active::Browser;
                         (true, true)
                     }
                     _ => (false, false),
@@ -167,7 +183,7 @@ pub fn run(p: Peripherals) -> ! {
                     };
                     crosspoint_core::battery::percentage_from_adc_millivolts(mv)
                 };
-                draw_active(&mut eink, active, &home, &reader);
+                draw_active(&mut eink, active, &home, &browser, &reader);
                 draw_battery(&mut eink, battery_pct);
                 let mode = if screen_change {
                     RefreshMode::Full
@@ -192,11 +208,16 @@ pub fn run(p: Peripherals) -> ! {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Active {
     Home,
+    Browser,
     Reader,
 }
 
 /// Home menu entries.
 const HOME_ITEMS: &[&str] = &["Open book", "About"];
+
+/// File browser entries. Static stub until SD-card listing is wired up; every
+/// entry currently opens the bundled sample text.
+const FILE_ITEMS: &[&str] = &["a-tale-of-two-cities.txt", "sample.txt", "notes.txt"];
 
 /// Fixed advance for FONT_6X10 (6 px per cell), so wrap widths match the render.
 fn adv6(_c: char) -> u16 {
@@ -204,18 +225,19 @@ fn adv6(_c: char) -> u16 {
 }
 
 /// Dispatch a render to whichever screen is active.
-fn draw_active<D>(target: &mut D, active: Active, home: &Home, reader: &Reader)
+fn draw_active<D>(target: &mut D, active: Active, home: &Menu, browser: &Menu, reader: &Reader)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
     match active {
-        Active::Home => draw_home(target, home),
+        Active::Home => draw_menu(target, "CrossPoint", home),
+        Active::Browser => draw_menu(target, "Books", browser),
         Active::Reader => draw_reader(target, reader),
     }
 }
 
-/// Render the home menu: title + selectable entries.
-fn draw_home<D>(target: &mut D, home: &Home)
+/// Render a titled vertical menu (Home / Browser).
+fn draw_menu<D>(target: &mut D, title: &str, menu: &Menu)
 where
     D: DrawTarget<Color = BinaryColor>,
 {
@@ -223,8 +245,7 @@ where
     let title_style = MonoTextStyle::new(&FONT_10X20, BinaryColor::On);
     let body_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
 
-    let _ = Text::with_baseline("CrossPoint", Point::new(16, 6), title_style, Baseline::Top)
-        .draw(target);
+    let _ = Text::with_baseline(title, Point::new(16, 6), title_style, Baseline::Top).draw(target);
 
     let menu_metrics = PageMetrics {
         width: pins::X4_WIDTH,
@@ -235,8 +256,8 @@ where
     };
     let _ = ui::render_menu(
         target,
-        home.items(),
-        home.selected(),
+        menu.items(),
+        menu.selected(),
         &menu_metrics,
         body_style,
     );

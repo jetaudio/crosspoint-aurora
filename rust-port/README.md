@@ -118,7 +118,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
 | Battery-latch shutdown (GPIO13) | ✅ |
 | Text wrap / pagination | ✅ (host-tested) |
 | Reader: paginate + Left/Right page navigation | ✅ (host-tested) |
-| Home menu + Home↔Reader screen navigation | ✅ (host-tested) |
+| Menu widget + Home → Browser → Reader navigation | ✅ (host-tested) |
+| File browser screen (stub list until SD is wired) | ✅ |
 | Book text + `.bin` font parsing | ✅ scaffold (bounds-checked) |
 | X3 (UC81xx) display path | ⛔ deferred (huge custom-LUT path; X4 is the target) |
 | EPUB/HTML parsing, SD/FAT, fonts on disk, file browser, Wi-Fi, settings | ⛔ roadmap |
@@ -128,7 +129,8 @@ Every GPIO is transcribed from the C++ source into `../discovered_pins.md`
    `SpiDevice` so the display and SD can share SPI2 with separate CS lines.
 2. On-disk bitmap fonts → wire `parser::font` into a real glyph renderer (and a
    variable-width `advance` so wrapping matches proportional fonts).
-3. File browser screen: list real book files from the SD card, open into Reader.
+3. Populate the file browser from the SD card (replace the stub list) and load
+   the selected file into the Reader.
 4. Deep-sleep wake path (power-button wake; the latch shutdown is done).
 5. Port the Aurora home layout (featured card + tab bar).
 6. X3 variant (UC81xx) display path.

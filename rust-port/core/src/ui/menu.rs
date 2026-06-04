@@ -1,16 +1,15 @@
-//! Home screen: a small vertical menu navigated with Up/Down and Select.
+//! A reusable vertical menu widget: a list of items with a wrapping cursor.
 //!
-//! This is the entry screen of the firmware's screen stack. It holds a fixed set
-//! of menu items and a selection cursor; the app maps Select on each item to a
-//! navigation action (e.g. open the reader).
+//! Used for both the Home screen and the file Browser — anywhere the firmware
+//! shows a selectable list navigated with Up/Down and chosen with Select.
 
-/// A vertical menu with a wrapping selection cursor.
-pub struct Home {
+/// A vertical menu with a wrapping selection cursor over a fixed item list.
+pub struct Menu {
     items: &'static [&'static str],
     selected: usize,
 }
 
-impl Home {
+impl Menu {
     pub fn new(items: &'static [&'static str]) -> Self {
         Self { items, selected: 0 }
     }
@@ -21,6 +20,11 @@ impl Home {
 
     pub fn selected(&self) -> usize {
         self.selected
+    }
+
+    /// The selected item's text, if any.
+    pub fn selected_item(&self) -> Option<&'static str> {
+        self.items.get(self.selected).copied()
     }
 
     /// Move the cursor up, wrapping to the bottom. Returns true if it moved.
@@ -54,21 +58,23 @@ mod tests {
 
     #[test]
     fn wraps_both_directions() {
-        let mut h = Home::new(ITEMS);
-        assert_eq!(h.selected(), 0);
-        assert!(h.down());
-        assert_eq!(h.selected(), 1);
-        assert!(h.down()); // wrap to top
-        assert_eq!(h.selected(), 0);
-        assert!(h.up()); // wrap to bottom
-        assert_eq!(h.selected(), 1);
+        let mut m = Menu::new(ITEMS);
+        assert_eq!(m.selected(), 0);
+        assert!(m.down());
+        assert_eq!(m.selected(), 1);
+        assert!(m.down()); // wrap to top
+        assert_eq!(m.selected(), 0);
+        assert!(m.up()); // wrap to bottom
+        assert_eq!(m.selected(), 1);
+        assert_eq!(m.selected_item(), Some("About"));
     }
 
     #[test]
     fn empty_menu_is_inert() {
-        let mut h = Home::new(&[]);
-        assert!(!h.up());
-        assert!(!h.down());
-        assert_eq!(h.selected(), 0);
+        let mut m = Menu::new(&[]);
+        assert!(!m.up());
+        assert!(!m.down());
+        assert_eq!(m.selected(), 0);
+        assert_eq!(m.selected_item(), None);
     }
 }
