@@ -202,14 +202,6 @@ void verifyPowerButtonDuration() {
     powerManager.startDeepSleep(gpio);
   }
 }
-void waitForPowerRelease() {
-  gpio.update();
-  while (gpio.isPressed(HalGPIO::BTN_POWER)) {
-    delay(50);
-    gpio.update();
-  }
-}
-
 constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
 
 static void saveSleepFrameBuffer() {
@@ -477,8 +469,11 @@ void setup() {
     gpio.update();
   }
 
-  // Ensure we're not still holding the power button before leaving setup
-  waitForPowerRelease();
+  // Fast wakeup: do NOT block here waiting for the power button to be released.
+  // Returning now lets the first loop() iteration paint the target activity
+  // while the button is still held, instead of leaving the panel frozen on the
+  // pre-boot (sleep-cover) frame until the user lets go. The allowSleepAt grace
+  // below keeps the still-held button from immediately re-triggering deep sleep.
   allowSleepAt = millis() + 2000;
 }
 
