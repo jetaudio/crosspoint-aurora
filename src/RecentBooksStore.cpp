@@ -57,6 +57,16 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
   }
 }
 
+void RecentBooksStore::updateProgress(const std::string& path, uint8_t percent) {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it == recentBooks.end() || it->progressPercent == percent) {
+    return;
+  }
+  it->progressPercent = percent;
+  saveToFile();
+}
+
 bool RecentBooksStore::removeByPath(const std::string& path) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });

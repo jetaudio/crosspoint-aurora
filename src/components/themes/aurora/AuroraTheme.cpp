@@ -34,6 +34,12 @@ constexpr int kTextGap = 16;       // Gap between thumbnail and title block
 constexpr int kIconSize = 32;      // Placeholder cover glyph / bottom-bar icon size
 constexpr int kSectionGap = 28;    // Gap above the "Library" header
 constexpr int kBottomBarHeight = 70;
+constexpr int kProgBarHeight = 12;     // "Now Reading" progress bar height
+constexpr int kCardHeight = 76;        // Recent-book card height
+constexpr int kCardGap = 8;            // Vertical gap between recent-book cards
+constexpr int kCardCoverH = 60;        // Recent-book card cover height
+constexpr int kCardCoverW = 38;        // Recent-book card cover width (~thumb aspect)
+constexpr int kCardPad = 10;           // Gap between a card's cover and its text
 constexpr int kSettingRowHeight = 40;  // Settings value row height
 constexpr int kSettingValueCol = 150;  // Reserved width for the right value column
 constexpr int kSettingArrow = 7;       // Triangle arrow size for adjustable values
@@ -121,48 +127,78 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const bool hasFeatured = !recentBooks.empty();
   const bool featuredSelected = listSelected == 0;
 
-  if (hasFeatured) {
-    const RecentBook& book = recentBooks[0];
-    const int thumbX = P;
-
-    // Cover thumbnail (load a single small BMP; falls back to a placeholder glyph).
-    bool drewCover = false;
+  // Draw a cached cover thumbnail into the given rect. The BMP (thumb_<homeCoverHeight>.bmp,
+  // generated once by HomeActivity) is streamed row-by-row from the SD card and scaled to
+  // fit, so it is RAM-cheap; the same cached file feeds both the big featured cover and the
+  // small recent-book card covers. Falls back to a filled box + glyph when no cover exists.
+  auto drawCover = [&](const RecentBook& book, int x, int y, int w, int h) {
+    bool drew = false;
     if (!book.coverBmpPath.empty()) {
       const std::string coverBmpPath = UITheme::getCoverThumbPath(book.coverBmpPath, metrics.homeCoverHeight);
       HalFile file;
       if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
         Bitmap bitmap(file);
         if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          renderer.drawBitmap(bitmap, thumbX, thumbY, kThumbWidth, kThumbHeight);
-          drewCover = true;
+          renderer.drawBitmap(bitmap, x, y, w, h);
+          drew = true;
         }
         file.close();
       }
     }
-    if (!drewCover) {
-      renderer.fillRect(thumbX, thumbY, kThumbWidth, kThumbHeight, true);
-      renderer.drawIcon(CoverIcon, thumbX + (kThumbWidth - kIconSize) / 2, thumbY + (kThumbHeight - kIconSize) / 2,
-                        kIconSize, kIconSize);
+    if (!drew) {
+      renderer.fillRect(x, y, w, h, true);
+      const int ic = std::min(kIconSize, std::min(w, h) - 6);
+      if (ic > 0) renderer.drawIcon(CoverIcon, x + (w - ic) / 2, y + (h - ic) / 2, ic, ic);
     }
-    renderer.drawRect(thumbX, thumbY, kThumbWidth, kThumbHeight);
+    renderer.drawRect(x, y, w, h);
+  };
 
-    // Title + author block to the right of the cover, vertically centered against
-    // the tall cover.
+  // Crisp e-ink progress bar: a 1px outlined track with a solid-black fill for the read
+  // portion. No gradients or anti-aliasing, so it stays sharp under fast partial refreshes.
+  auto drawProgressBar = [&](int x, int y, int w, int pct) {
+    pct = std::max(0, std::min(100, pct));
+    renderer.drawRect(x, y, w, kProgBarHeight);
+    const int fillW = (w - 4) * pct / 100;
+    if (fillW > 0) renderer.fillRect(x + 2, y + 2, fillW, kProgBarHeight - 4, true);
+  };
+
+  if (hasFeatured) {
+    const RecentBook& book = recentBooks[0];
+    const int thumbX = P;
+    drawCover(book, thumbX, thumbY, kThumbWidth, kThumbHeight);
+
+    // Title + author + progress block to the right of the cover, vertically centered
+    // against the tall cover.
     const int txtX = thumbX + kThumbWidth + kTextGap;
     const int txtW = W - P - txtX;
     const auto titleLines = renderer.wrappedText(kTitleFontId, book.title.c_str(), txtW, 3, EpdFontFamily::BOLD);
     const bool hasAuthor = !book.author.empty();
-    int blockHeight = static_cast<int>(titleLines.size()) * renderer.getLineHeight(kTitleFontId);
-    if (hasAuthor) blockHeight += renderer.getLineHeight(kBodyFontId) + 6;
+    const bool hasProgress = book.progressPercent != RecentBook::kProgressUnknown;
+    const int titleLineH = renderer.getLineHeight(kTitleFontId);
+    const int bodyLineH = renderer.getLineHeight(kBodyFontId);
+    const int capLineH = renderer.getLineHeight(kCaptionFontId);
+
+    int blockHeight = static_cast<int>(titleLines.size()) * titleLineH;
+    if (hasAuthor) blockHeight += bodyLineH + 6;
+    if (hasProgress) blockHeight += 12 + capLineH + 4 + kProgBarHeight;
+
     int textY = thumbY + std::max(4, (kThumbHeight - blockHeight) / 2);
     for (const auto& line : titleLines) {
       renderer.drawText(kTitleFontId, txtX, textY, line.c_str(), true, EpdFontFamily::BOLD);
-      textY += renderer.getLineHeight(kTitleFontId);
+      textY += titleLineH;
     }
     if (hasAuthor) {
       textY += 6;
       const auto author = renderer.truncatedText(kBodyFontId, book.author.c_str(), txtW);
       renderer.drawText(kBodyFontId, txtX, textY, author.c_str());
+      textY += bodyLineH;
+    }
+    if (hasProgress) {
+      textY += 12;
+      const std::string label = std::string(tr(STR_BOOK_PROGRESS)) + ": " + std::to_string(book.progressPercent) + "%";
+      renderer.drawText(kCaptionFontId, txtX, textY, label.c_str(), true, EpdFontFamily::BOLD);
+      textY += capLineH + 4;
+      drawProgressBar(txtX, textY, txtW, book.progressPercent);
     }
 
     // Selection emphasis around the whole card (double border).
@@ -179,11 +215,10 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     renderer.drawCenteredText(kTitleFontId, emptyY, tr(STR_NO_OPEN_BOOK));
   }
 
-  // --- "Recent Books" header + recent-books list (books only; nav lives in the bottom bar) ---
-  // The page title is now "Library", so this in-content section uses "Recent Books"
-  // to avoid showing "Library" twice on the same screen.
-  // The list sits level with the right-edge arrow hints, so reserve that strip when
-  // the edge hints are shown (same inset the settings list uses) to avoid overlap.
+  // --- "Recent Books" header + card list (library = recentBooks[1..]) ---
+  // The page title is "Library", so this in-content section uses "Recent Books" to avoid
+  // showing "Library" twice. The list sits level with the right-edge arrow hints, so reserve
+  // that strip when the edge hints are shown (same inset the settings list uses).
   const int rightInset = SETTINGS.showEdgeButtonHints() ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
   renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
@@ -198,10 +233,86 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int librarySelected = listSelected >= 1 ? listSelected - 1 : -1;
   const int listHeight = std::max(0, barTop - listTop);
 
-  drawList(
-      renderer, Rect{0, listTop, W - rightInset, listHeight}, libBookCount, librarySelected,
-      [&recentBooks, featuredOffset](int i) { return recentBooks[featuredOffset + i].title; }, nullptr,
-      [](int) -> UIIcon { return Book; });
+  // Recent-book cards: cover (left) + title / author / read-% (right). No progress bar here
+  // (that is the Now Reading affordance). Paginated like the shared list so a selected card
+  // that falls off the current page flips it into view.
+  const int cardStride = kCardHeight + kCardGap;
+  const int pageItems = cardStride > 0 ? std::max(1, (listHeight + kCardGap) / cardStride) : 0;
+  if (libBookCount > 0 && pageItems > 0) {
+    const int cardX = P;
+    const int cardW = W - 2 * P - rightInset;
+    const int totalPages = (libBookCount + pageItems - 1) / pageItems;
+    const int selForPage = librarySelected >= 0 ? librarySelected : 0;
+    const int pageStart = selForPage / pageItems * pageItems;
+
+    for (int slot = 0; slot < pageItems; ++slot) {
+      const int i = pageStart + slot;
+      if (i >= libBookCount) break;
+      const RecentBook& book = recentBooks[featuredOffset + i];
+      const int cardY = listTop + slot * cardStride;
+      const bool selected = (i == librarySelected);
+
+      // Selection: rounded light-gray pill behind the card (text stays black on top).
+      if (selected) {
+        renderer.fillRoundedRect(cardX - 6, cardY, cardW + 12, kCardHeight, 10, Color::LightGray);
+      }
+
+      // Cover on the left, vertically centered.
+      const int coverY = cardY + (kCardHeight - kCardCoverH) / 2;
+      drawCover(book, cardX, coverY, kCardCoverW, kCardCoverH);
+
+      // Right column: title (bold, up to 2 lines) then an author / read-% row.
+      const int infoX = cardX + kCardCoverW + kCardPad;
+      const int infoRight = cardX + cardW;
+      const int infoW = std::max(20, infoRight - infoX);
+      const bool hasProgress = book.progressPercent != RecentBook::kProgressUnknown;
+      const std::string pctText = hasProgress ? (std::to_string(book.progressPercent) + "%") : std::string();
+      const int pctW = hasProgress ? renderer.getTextWidth(kCaptionFontId, pctText.c_str(), EpdFontFamily::BOLD) : 0;
+
+      const auto titleLines = renderer.wrappedText(kBodyFontId, book.title.c_str(), infoW, 2, EpdFontFamily::BOLD);
+      const int bodyLineH = renderer.getLineHeight(kBodyFontId);
+      const int capLineH = renderer.getLineHeight(kCaptionFontId);
+      const bool hasAuthor = !book.author.empty();
+      int blockH = static_cast<int>(titleLines.size()) * bodyLineH;
+      if (hasAuthor || hasProgress) blockH += 4 + capLineH;
+
+      int ty = cardY + std::max(2, (kCardHeight - blockH) / 2);
+      for (const auto& line : titleLines) {
+        renderer.drawText(kBodyFontId, infoX, ty, line.c_str(), true, EpdFontFamily::BOLD);
+        ty += bodyLineH;
+      }
+      if (hasAuthor || hasProgress) {
+        ty += 4;
+        if (hasProgress) {
+          renderer.drawText(kCaptionFontId, infoRight - pctW, ty, pctText.c_str(), true, EpdFontFamily::BOLD);
+        }
+        if (hasAuthor) {
+          const int authorW = std::max(20, infoW - (hasProgress ? pctW + 10 : 0));
+          const auto author = renderer.truncatedText(kCaptionFontId, book.author.c_str(), authorW);
+          renderer.drawText(kCaptionFontId, infoX, ty, author.c_str());
+        }
+      }
+    }
+
+    // Page up/down arrows on the right when the list spans multiple pages
+    // (mirrors the shared drawList indicator).
+    if (totalPages > 1) {
+      constexpr int arrowSize = 6;
+      const int centerX = cardX + cardW - 4;
+      const int indicatorTop = listTop;
+      const int indicatorBottom = listTop + listHeight - arrowSize;
+      for (int k = 0; k < arrowSize; ++k) {
+        const int lineWidth = 1 + k * 2;
+        renderer.drawLine(centerX - k, indicatorTop + k, centerX - k + lineWidth - 1, indicatorTop + k);
+      }
+      for (int k = 0; k < arrowSize; ++k) {
+        const int lineWidth = 1 + (arrowSize - 1 - k) * 2;
+        const int startX = centerX - (arrowSize - 1 - k);
+        renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + k, startX + lineWidth - 1,
+                          indicatorBottom - arrowSize + 1 + k);
+      }
+    }
+  }
 
   // --- Persistent bottom navigation bar (Library tab active on Home) ---
   drawBottomBar(renderer, Rect{0, barTop, W, kBottomBarHeight}, barLabels, barIcons, activeTab);

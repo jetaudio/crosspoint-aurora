@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,12 @@ struct RecentBook {
   std::string title;
   std::string author;
   std::string coverBmpPath;
+  // Whole-book reading progress as a 0..100 percentage. kProgressUnknown means we
+  // have no saved progress yet (e.g. the book predates this field or was never
+  // opened) — the UI hides the percent/bar in that case. Updated by the reader on
+  // exit so the home screen can show it without reparsing the book.
+  static constexpr uint8_t kProgressUnknown = 255;
+  uint8_t progressPercent = kProgressUnknown;
 
   bool operator==(const RecentBook& other) const { return path == other.path; }
 };
@@ -36,6 +43,11 @@ class RecentBooksStore {
 
   void updateBook(const std::string& path, const std::string& title, const std::string& author,
                   const std::string& coverBmpPath);
+
+  // Update just the reading-progress percentage (0..100) for an existing entry, keeping its
+  // list position. No-op if no entry matches. Persists only when the value actually changed,
+  // so repeated saves with the same percent don't churn the SD card.
+  void updateProgress(const std::string& path, uint8_t percent);
 
   // Remove the entry whose path matches (used when a book is removed from recents or finished/read).
   // Returns true if an entry was found and removed (no-op + false otherwise).
