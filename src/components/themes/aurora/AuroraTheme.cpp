@@ -183,8 +183,8 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   // The page title is now "Library", so this in-content section uses "Recent Books"
   // to avoid showing "Library" twice on the same screen.
   // The list sits level with the right-edge arrow hints, so reserve that strip when
-  // hints are shown (same inset the settings list uses) to avoid overlap.
-  const int rightInset = SETTINGS.showButtonHints ? (metrics.sideButtonHintsWidth + 10) : 0;
+  // the edge hints are shown (same inset the settings list uses) to avoid overlap.
+  const int rightInset = SETTINGS.showEdgeButtonHints() ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
   renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
   const int underlineY = libHeaderY + renderer.getLineHeight(kHeaderFontId) + 4;
@@ -257,7 +257,7 @@ void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const 
   // is breathing room before the group's card, so names don't crowd their options.
   const int headerH = 38;
   constexpr int kHeaderTextTop = 10;
-  const int rightInset = SETTINGS.showButtonHints ? (metrics.sideButtonHintsWidth + 10) : 0;
+  const int rightInset = SETTINGS.showEdgeButtonHints() ? (metrics.sideButtonHintsWidth + 10) : 0;
   const int rowLeft = P - 4;
   const int rowRight = W - (P - 4) - rightInset;
   const int valueRightX = rowRight - 10;
@@ -470,9 +470,46 @@ void AuroraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount
   }
 }
 
+void AuroraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                  const char* btn4) const {
+  // User can hide the on-screen button hint row for a cleaner layout.
+  if (!SETTINGS.showFrontButtonHints()) {
+    return;
+  }
+
+  const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
+  const int pageHeight = renderer.getScreenHeight();
+  constexpr int buttonWidth = 106;
+  constexpr int buttonHeight = BaseMetrics::values.buttonHintsHeight;
+  constexpr int buttonY = BaseMetrics::values.buttonHintsHeight;  // Distance from bottom
+  constexpr int textYOffset = 9;                                  // Distance from top of button to text baseline
+  // X3 has wider screen in portrait (528 vs 480), use more spacing
+  constexpr int x4ButtonPositions[] = {25, 130, 245, 350};
+  constexpr int x3ButtonPositions[] = {38, 154, 268, 384};
+  const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
+  const char* labels[] = {btn1, btn2, btn3, btn4};
+
+  // Aurora uses SMALL (one step below the base theme's UI_10) for a lighter hint row.
+  for (int i = 0; i < 4; i++) {
+    // Only draw if the label is non-empty
+    if (labels[i] != nullptr && labels[i][0] != '\0') {
+      const int x = buttonPositions[i];
+      renderer.fillRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, false);
+      renderer.drawRect(x, pageHeight - buttonY, buttonWidth, buttonHeight);
+      const int textWidth = renderer.getTextWidth(kBarLabelFontId, labels[i]);
+      const int textX = x + (buttonWidth - 1 - textWidth) / 2;
+      renderer.drawText(kBarLabelFontId, textX, pageHeight - buttonY + textYOffset, labels[i]);
+    }
+  }
+
+  renderer.setOrientation(orig_orientation);
+}
+
 void AuroraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
-  // Governed by the same user toggle as the front button hint row.
-  if (!SETTINGS.showButtonHints) return;
+  // Edge hints only appear in the Front + Edge mode (the front row can show alone).
+  if (!SETTINGS.showEdgeButtonHints()) return;
 
   // Same box positions/height as the base theme (they line up with the physical
   // side buttons); Aurora only narrows the strip and swaps the rotated "Up"/"Down"
