@@ -57,10 +57,18 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
   bool showingLoading = false;
   Rect popupRect;
 
+  // Themes with a card-style recent list (homeCardCoverHeight > 0) draw the first book as a
+  // large featured cover and the rest as small card covers. Generate each thumbnail at the
+  // exact size it is displayed so the theme can blit it ~1:1 (downscaling a large 1-bit
+  // thumbnail to card size renders it solid black). Themes without card covers keep using
+  // coverHeight for every entry, so the total thumbnail count is unchanged.
+  const int cardCoverHeight = UITheme::getInstance().getMetrics().homeCardCoverHeight;
+
   int progress = 0;
   for (RecentBook& book : recentBooks) {
+    const int genHeight = (cardCoverHeight > 0 && progress > 0) ? cardCoverHeight : coverHeight;
     if (!book.coverBmpPath.empty()) {
-      std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
+      std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, genHeight);
       if (!Storage.exists(coverPath.c_str())) {
         // If epub, try to load the metadata for title/author and cover
         if (FsHelpers::hasEpubExtension(book.path)) {
@@ -74,7 +82,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
             popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
           }
           GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-          bool success = epub.generateThumbBmp(coverHeight);
+          bool success = epub.generateThumbBmp(genHeight);
           if (!success) {
             RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
             book.coverBmpPath = "";
@@ -91,7 +99,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
               popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
             }
             GUI.fillPopupProgress(renderer, popupRect, 10 + progress * (90 / recentBooks.size()));
-            bool success = xtc.generateThumbBmp(coverHeight);
+            bool success = xtc.generateThumbBmp(genHeight);
             if (!success) {
               RECENT_BOOKS.updateBook(book.path, book.title, book.author, "");
               book.coverBmpPath = "";

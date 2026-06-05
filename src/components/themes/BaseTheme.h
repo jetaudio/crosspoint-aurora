@@ -76,6 +76,12 @@ struct ThemeMetrics {
   int homeTopPadding;
   int homeCoverHeight;
   int homeCoverTileHeight;
+  // Height for the small per-book cover thumbnails a card-style home list draws (0 = the
+  // theme has no separate card covers, so only homeCoverHeight thumbnails are generated).
+  // Generating the thumbnail at its display size lets drawBitmap blit it ~1:1; downscaling a
+  // large 1-bit thumbnail instead fills small covers solid black (drawBitmap1Bit has no
+  // area-averaging downscaler).
+  int homeCardCoverHeight;
   int homeRecentBooksCount;
   bool homeContinueReadingInMenu;
   int homeMenuTopOffset;
@@ -154,6 +160,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeTopPadding = 40,
                                  .homeCoverHeight = 400,
                                  .homeCoverTileHeight = 400,
+                                 .homeCardCoverHeight = 0,
                                  .homeRecentBooksCount = 1,
                                  .homeContinueReadingInMenu = false,
                                  .homeMenuTopOffset = 10,

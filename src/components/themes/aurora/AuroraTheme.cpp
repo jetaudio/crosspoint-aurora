@@ -37,8 +37,7 @@ constexpr int kBottomBarHeight = 70;
 constexpr int kProgBarHeight = 12;     // "Now Reading" progress bar height
 constexpr int kCardHeight = 76;        // Recent-book card height
 constexpr int kCardGap = 8;            // Vertical gap between recent-book cards
-constexpr int kCardCoverH = 60;        // Recent-book card cover height
-constexpr int kCardCoverW = 38;        // Recent-book card cover width (~thumb aspect)
+constexpr int kCardCoverW = 38;        // Card cover width (>= thumb width; height = homeCardCoverHeight)
 constexpr int kCardPad = 10;           // Gap between a card's cover and its text
 constexpr int kSettingRowHeight = 40;  // Settings value row height
 constexpr int kSettingValueCol = 150;  // Reserved width for the right value column
@@ -127,14 +126,15 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const bool hasFeatured = !recentBooks.empty();
   const bool featuredSelected = listSelected == 0;
 
-  // Draw a cached cover thumbnail into the given rect. The BMP (thumb_<homeCoverHeight>.bmp,
-  // generated once by HomeActivity) is streamed row-by-row from the SD card and scaled to
-  // fit, so it is RAM-cheap; the same cached file feeds both the big featured cover and the
-  // small recent-book card covers. Falls back to a filled box + glyph when no cover exists.
-  auto drawCover = [&](const RecentBook& book, int x, int y, int w, int h) {
+  // Draw a cached cover thumbnail into the given rect. The thumbnail is generated once by
+  // HomeActivity at thumbHeight (the featured cover at homeCoverHeight, the small card covers
+  // at homeCardCoverHeight) and streamed row-by-row from the SD card, so it blits ~1:1 and is
+  // RAM-cheap. Drawing each cover at the size its thumbnail was generated avoids drawBitmap's
+  // 1-bit downscale path, which fills small covers solid black. Falls back to a box + glyph.
+  auto drawCover = [&](const RecentBook& book, int x, int y, int w, int h, int thumbHeight) {
     bool drew = false;
     if (!book.coverBmpPath.empty()) {
-      const std::string coverBmpPath = UITheme::getCoverThumbPath(book.coverBmpPath, metrics.homeCoverHeight);
+      const std::string coverBmpPath = UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight);
       HalFile file;
       if (Storage.openFileForRead("HOME", coverBmpPath, file)) {
         Bitmap bitmap(file);
@@ -165,7 +165,7 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   if (hasFeatured) {
     const RecentBook& book = recentBooks[0];
     const int thumbX = P;
-    drawCover(book, thumbX, thumbY, kThumbWidth, kThumbHeight);
+    drawCover(book, thumbX, thumbY, kThumbWidth, kThumbHeight, metrics.homeCoverHeight);
 
     // Title + author + progress block to the right of the cover, vertically centered
     // against the tall cover.
@@ -257,9 +257,11 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
         renderer.fillRoundedRect(cardX - 6, cardY, cardW + 12, kCardHeight, 10, Color::LightGray);
       }
 
-      // Cover on the left, vertically centered.
-      const int coverY = cardY + (kCardHeight - kCardCoverH) / 2;
-      drawCover(book, cardX, coverY, kCardCoverW, kCardCoverH);
+      // Cover on the left, vertically centered. Drawn at homeCardCoverHeight (the size its
+      // thumbnail was generated) so it blits ~1:1 instead of black-filling via downscale.
+      const int cardCoverH = metrics.homeCardCoverHeight;
+      const int coverY = cardY + (kCardHeight - cardCoverH) / 2;
+      drawCover(book, cardX, coverY, kCardCoverW, cardCoverH, cardCoverH);
 
       // Right column: title (bold, up to 2 lines) then an author / read-% row.
       const int infoX = cardX + kCardCoverW + kCardPad;
