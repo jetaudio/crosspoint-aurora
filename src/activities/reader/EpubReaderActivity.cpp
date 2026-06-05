@@ -180,6 +180,22 @@ void EpubReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+
+  // Persist whole-book reading progress so the home screen can show the percentage
+  // (and progress bar) without reparsing the book. Computed here, while the spine
+  // metadata and current position are still resident, before they're released below.
+  // If the entry was already dropped from recents (finished + removeReadBooksFromRecents),
+  // updateProgress is a harmless no-op; if the book is about to move to /Read/, the
+  // subsequent updatePath keeps this percent on the repointed entry.
+  if (epub && section) {
+    const float chapterProgress =
+        section->pageCount > 0 ? static_cast<float>(section->currentPage + 1) / static_cast<float>(section->pageCount)
+                               : 0.0f;
+    const int percent =
+        clampPercent(static_cast<int>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f + 0.5f));
+    RECENT_BOOKS.updateProgress(epub->getPath(), static_cast<uint8_t>(percent));
+  }
+
   section.reset();
   if (pendingReadFolderMove && epub) {
     const std::string srcPath = epub->getPath();
