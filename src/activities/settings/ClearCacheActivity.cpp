@@ -121,8 +121,11 @@ void ClearCacheActivity::clearCache() {
 }
 
 void ClearCacheActivity::loop() {
+  // Use release edges (matching the parent Settings screen): a single Back/Confirm
+  // press must not be handled by both this screen (on press) and the parent (on
+  // release), which would pop straight back to the library. See LanguageSelectActivity.
   if (state == WARNING) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       LOG_DBG("CLEAR_CACHE", "User confirmed, starting cache clear");
       {
         RenderLock lock(*this);
@@ -133,7 +136,7 @@ void ClearCacheActivity::loop() {
       clearCache();
     }
 
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       LOG_DBG("CLEAR_CACHE", "User cancelled");
       goBack();
     }
@@ -141,7 +144,7 @@ void ClearCacheActivity::loop() {
   }
 
   if (state == SUCCESS || state == FAILED) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       goBack();
     }
     return;

@@ -109,12 +109,15 @@ void ClockOffsetActivity::adjustActiveField(int delta) {
 }
 
 void ClockOffsetActivity::loop() {
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+  // Use release edges (matching the parent Settings screen): a single Back/Confirm
+  // press must not be handled by both this submenu (on press) and the parent (on
+  // release), which would pop straight back to the library. See LanguageSelectActivity.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     activeField = static_cast<Field>((activeField + 1) % FIELD_COUNT);
     requestUpdate();
     return;

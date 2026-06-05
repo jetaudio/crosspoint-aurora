@@ -93,7 +93,10 @@ void ClockSyncActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+  // Release edges (matching the parent Settings screen) so this dismissal press isn't
+  // also seen by the parent on release, popping straight back to the library.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back) ||
+      mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     finish();
   }
 }

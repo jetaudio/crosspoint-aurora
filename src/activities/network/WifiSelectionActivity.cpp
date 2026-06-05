@@ -330,15 +330,16 @@ void WifiSelectionActivity::loop() {
         savePromptSelection++;
         requestUpdate();
       }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (savePromptSelection == 0) {
         // User chose "Yes" - save the password
         RenderLock lock(*this);
         WIFI_STORE.addCredential(selectedSSID, enteredPassword);
       }
-      // Complete - parent will start web server
+      // Complete - parent will start web server. Release edge so this confirming press
+      // isn't also seen by the parent on release, popping straight back to the library.
       onComplete(true);
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       // Skip saving, complete anyway
       onComplete(true);
     }
@@ -409,8 +410,10 @@ void WifiSelectionActivity::loop() {
 
   // Handle network list state
   if (state == WifiSelectionState::NETWORK_LIST) {
-    // Check for Back button to exit (cancel)
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    // Check for Back button to exit (cancel). Use a release edge (matching the parent
+    // Settings screen) so a single press isn't handled here (on press) and again by the
+    // parent (on release), popping straight back to the library. See LanguageSelectActivity.
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       onComplete(false);
       return;
     }
