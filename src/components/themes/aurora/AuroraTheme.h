@@ -61,6 +61,11 @@ class AuroraTheme : public BaseTheme {
                 const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                 const std::function<bool(int index)>& rowDimmed = nullptr) const override;
 
+  // Front button-hint row, identical to the base theme but with the label font one
+  // step smaller (SMALL instead of UI_10) so the hints read lighter under Aurora.
+  void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                       const char* btn4) const override;
+
   // Slim edge-button hints: two small boxes on the right edge (X4) / sides (X3),
   // each holding an up/down arrow glyph instead of rotated "Up"/"Down" text.
   void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -27,6 +28,101 @@
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+namespace {
+
+// Map one Unicode codepoint to uppercase for the scripts the UI ships: ASCII,
+// Latin-1, Latin Extended-A/-B, Vietnamese (Latin Extended Additional) and
+// Cyrillic. Anything else passes through unchanged. std::toupper can't be used
+// for this because it works one byte at a time and mangles multi-byte UTF-8
+// (e.g. "Đọc sách" -> "ĐọC SáCH" with the accented letters left lowercase).
+uint32_t toUpperCodepoint(uint32_t cp) {
+  if (cp >= 'a' && cp <= 'z') return cp - 32;                          // ASCII
+  if (cp >= 0x00E0 && cp <= 0x00FE && cp != 0x00F7) return cp - 0x20;  // à–þ (skip ÷)
+  if (cp == 0x00FF) return 0x0178;                                    // ÿ → Ÿ
+  if (cp >= 0x0100 && cp <= 0x017F) {                                 // Latin Extended-A
+    if (cp == 0x0131) return 0x0049;                                  // ı → I
+    if (cp == 0x017F) return 0x0053;                                  // ſ → S
+    if ((cp >= 0x0100 && cp <= 0x0137) || (cp >= 0x014A && cp <= 0x0177))
+      return (cp & 1) ? cp - 1 : cp;  // upper is even (e.g. ă 0x0103 → Ă 0x0102, đ 0x0111 → Đ 0x0110)
+    if ((cp >= 0x0139 && cp <= 0x0148) || (cp >= 0x0179 && cp <= 0x017E))
+      return (cp & 1) ? cp : cp - 1;  // upper is odd
+    return cp;
+  }
+  if (cp == 0x01A1) return 0x01A0;  // ơ → Ơ
+  if (cp == 0x01B0) return 0x01AF;  // ư → Ư
+  if (cp >= 0x1EA0 && cp <= 0x1EFF) return (cp & 1) ? cp - 1 : cp;  // Vietnamese tone marks: upper even
+  if (cp >= 0x0430 && cp <= 0x044F) return cp - 0x20;              // Cyrillic а–я
+  if (cp >= 0x0450 && cp <= 0x045F) return cp - 0x50;              // Cyrillic ѐ–џ
+  return cp;
+}
+
+// UTF-8-aware uppercase. Decodes each codepoint, uppercases it, re-encodes.
+// Invalid byte sequences are copied through verbatim.
+std::string utf8ToUpper(const std::string& in) {
+  std::string out;
+  out.reserve(in.size());
+  const size_t n = in.size();
+  size_t i = 0;
+  while (i < n) {
+    const unsigned char b = static_cast<unsigned char>(in[i]);
+    uint32_t cp = 0;
+    size_t len = 0;
+    if (b < 0x80) {
+      cp = b;
+      len = 1;
+    } else if ((b >> 5) == 0x6) {
+      cp = b & 0x1F;
+      len = 2;
+    } else if ((b >> 4) == 0xE) {
+      cp = b & 0x0F;
+      len = 3;
+    } else if ((b >> 3) == 0x1E) {
+      cp = b & 0x07;
+      len = 4;
+    } else {
+      out.push_back(in[i++]);  // stray continuation/invalid lead byte
+      continue;
+    }
+    if (i + len > n) {
+      out.push_back(in[i++]);  // truncated sequence
+      continue;
+    }
+    bool ok = true;
+    for (size_t k = 1; k < len; ++k) {
+      const unsigned char cb = static_cast<unsigned char>(in[i + k]);
+      if ((cb >> 6) != 0x2) {
+        ok = false;
+        break;
+      }
+      cp = (cp << 6) | (cb & 0x3F);
+    }
+    if (!ok) {
+      out.push_back(in[i++]);
+      continue;
+    }
+    cp = toUpperCodepoint(cp);
+    if (cp < 0x80) {
+      out.push_back(static_cast<char>(cp));
+    } else if (cp < 0x800) {
+      out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp < 0x10000) {
+      out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+      out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+    i += len;
+  }
+  return out;
+}
+
+}  // namespace
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
                                                               StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
@@ -71,7 +167,12 @@ void SettingsActivity::rebuildSettingsLists() {
   // Insert "Manage Fonts" right after the font family setting so users discover it naturally
   readerSettings.insert(readerSettings.begin() + 1,
                         SettingInfo::Action(StrId::STR_MANAGE_FONTS, SettingAction::DownloadFonts));
-  readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
+  // The persistent reader status bar is only drawn by themes that don't own the
+  // reader chrome (Aurora keeps the reading page clean and hides it), so its
+  // customisation entry would do nothing there — only offer it when it applies.
+  if (!GUI.ownsReaderChrome()) {
+    readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
+  }
 
   // Update currentSettings pointer and count for the active category
   switch (selectedCategoryIndex) {
@@ -575,9 +676,10 @@ void SettingsActivity::render(RenderLock&&) {
     for (const auto& entry : auroraEntries) {
       if (entry.isHeader) {
         // STR_NONE_OPT marks a spacer (blank label). Otherwise uppercase the
-        // section label, matching the reference design (ASCII).
+        // section label, matching the reference design. UTF-8-aware so accented
+        // scripts (Vietnamese, Cyrillic, …) uppercase correctly, not byte-wise.
         std::string header = entry.header == StrId::STR_NONE_OPT ? std::string() : std::string(I18N.get(entry.header));
-        for (char& c : header) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        header = utf8ToUpper(header);
         items.push_back(SettingsListItem{true, std::move(header), "", false, false});
         continue;
       }
@@ -590,17 +692,21 @@ void SettingsActivity::render(RenderLock&&) {
       ++row;
     }
 
-    const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
+    const int hintRowHeight = SETTINGS.showFrontButtonHints() ? metrics.buttonHintsHeight : 0;
     const int barH = advancedPage ? 0 : GUI.bottomBarHeight();
     const char* title = advancedPage ? tr(STR_ADVANCED_SETTINGS) : tr(STR_SETTINGS_TITLE);
     GUI.drawSettingsScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight - barH}, title, items);
 
     // Front hints: Back, Select; Left/Right switch tabs on the top-level page.
+    // The top-level settings tab's "Back" returns to the home screen, so label it
+    // STR_HOME (matching the file browser's root); the advanced sub-page genuinely
+    // goes back, so keep STR_BACK there.
     const char* leftHint = advancedPage ? "" : tr(STR_DIR_LEFT);
     const char* rightHint = advancedPage ? "" : tr(STR_DIR_RIGHT);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), leftHint, rightHint);
+    const char* backLabel = advancedPage ? tr(STR_BACK) : tr(STR_HOME);
+    const auto labels = mappedInput.mapLabels(backLabel, tr(STR_SELECT), leftHint, rightHint);
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    // Side hints (2): Up/Down move between rows. Self-guarded by showButtonHints.
+    // Side hints (2): Up/Down move between rows. Self-guarded (Front + Edge mode only).
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
     if (!advancedPage) HomeTabBar::draw(renderer, pageWidth, pageHeight, HomeTabBar::Settings);

@@ -97,6 +97,20 @@ class CrossPointSettings {
   // Default: Up = Previous, Down = Next
   enum SIDE_BUTTON_LAYOUT { PREV_NEXT = 0, NEXT_PREV = 1, SIDE_BUTTONS_DISABLED = 2, SIDE_BUTTON_LAYOUT_COUNT };
 
+  // On-screen button hint display mode.
+  //   FRONT_ONLY     - draw only the bottom front-button hint row
+  //   FRONT_AND_EDGE - also draw the side (edge) Up/Down hints
+  //   OFF            - hide both
+  // Values are ordered so the legacy boolean migrates cleanly: the old default 1
+  // ("on" = both rows shown) maps to FRONT_AND_EDGE; the old 0 ("hidden") maps to
+  // FRONT_ONLY.
+  enum BUTTON_HINTS_MODE {
+    BUTTON_HINTS_FRONT_ONLY = 0,
+    BUTTON_HINTS_FRONT_AND_EDGE = 1,
+    BUTTON_HINTS_OFF = 2,
+    BUTTON_HINTS_MODE_COUNT
+  };
+
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { NOTOSERIF = 0, NOTOSANS = 1, FONT_FAMILY_COUNT };
   static constexpr uint8_t LEGACY_OPENDYSLEXIC = 2;
@@ -210,9 +224,11 @@ class CrossPointSettings {
   uint8_t frontButtonLayout = BACK_CONFIRM_LEFT_RIGHT;
   uint8_t sideButtonLayout = PREV_NEXT;
   uint8_t frontButtonFollowOrientation = 0;
-  // Show the on-screen front button hint row (1 = show, 0 = hide). Lets users
-  // hide the hints for a cleaner layout (e.g. the Aurora theme's bottom bar).
-  uint8_t showButtonHints = 1;
+  // On-screen button hint display mode (BUTTON_HINTS_MODE). Lets users show only
+  // the front hint row, the front row plus the side/edge arrows, or hide both for
+  // a cleaner layout (e.g. the Aurora theme's bottom bar). Field name kept for the
+  // existing "showButtonHints" JSON key; legacy 0/1 values migrate in range.
+  uint8_t showButtonHints = BUTTON_HINTS_FRONT_AND_EDGE;
   // Front button remap (logical -> hardware)
   // Used by MappedInputManager to translate logical buttons into physical front buttons.
   uint8_t frontButtonBack = FRONT_HW_BACK;
@@ -288,6 +304,11 @@ class CrossPointSettings {
   uint16_t getPowerButtonDuration() const {
     return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
   }
+
+  // Front (bottom) hint row is shown in both FRONT_ONLY and FRONT_AND_EDGE modes.
+  bool showFrontButtonHints() const { return showButtonHints != BUTTON_HINTS_OFF; }
+  // Side/edge Up/Down hints are shown only in FRONT_AND_EDGE mode.
+  bool showEdgeButtonHints() const { return showButtonHints == BUTTON_HINTS_FRONT_AND_EDGE; }
   int getReaderFontId() const;
 
   // If count_only is true, returns the number of settings items that would be written.

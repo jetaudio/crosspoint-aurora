@@ -135,7 +135,7 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
   // User can hide the on-screen button hint row for a cleaner layout.
-  if (!SETTINGS.showButtonHints) {
+  if (!SETTINGS.showFrontButtonHints()) {
     return;
   }
 
@@ -169,8 +169,8 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const {
-  // Governed by the same user toggle as the front button hint row.
-  if (!SETTINGS.showButtonHints) {
+  // Edge hints only appear in the Front + Edge mode (the front row can show alone).
+  if (!SETTINGS.showEdgeButtonHints()) {
     return;
   }
 

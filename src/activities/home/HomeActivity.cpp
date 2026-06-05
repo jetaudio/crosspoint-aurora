@@ -257,7 +257,7 @@ void HomeActivity::render(RenderLock&&) {
     const std::vector<UIIcon> barIcons = HomeTabBar::icons();
 
     // Reserve space for the front button hint row only when the user shows it.
-    const int hintRowHeight = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
+    const int hintRowHeight = SETTINGS.showFrontButtonHints() ? metrics.buttonHintsHeight : 0;
 
     GUI.drawHomeScreen(renderer, Rect{0, 0, pageWidth, pageHeight - hintRowHeight}, recentBooks, barLabels, barIcons,
                        homeListIndex, HomeTabBar::Library);
@@ -265,7 +265,7 @@ void HomeActivity::render(RenderLock&&) {
     // Front hints: Back hidden on home (top-level, like Lyra); Select opens, Left/Right switch tabs.
     const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    // Side hints (2): Up/Down browse the list. Self-guarded by showButtonHints.
+    // Side hints (2): Up/Down browse the list. Self-guarded (Front + Edge mode only).
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
     renderer.displayBuffer();

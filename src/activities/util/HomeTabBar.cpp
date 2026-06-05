@@ -33,7 +33,7 @@ void HomeTabBar::draw(GfxRenderer& renderer, int pageWidth, int pageHeight, int 
   const int barH = GUI.bottomBarHeight();
   if (barH <= 0) return;  // theme without a persistent bar
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int hintH = SETTINGS.showButtonHints ? metrics.buttonHintsHeight : 0;
+  const int hintH = SETTINGS.showFrontButtonHints() ? metrics.buttonHintsHeight : 0;
   const int barTop = pageHeight - hintH - barH;
   GUI.drawBottomBar(renderer, Rect{0, barTop, pageWidth, barH}, labels(), icons(), activeTab);
 }
