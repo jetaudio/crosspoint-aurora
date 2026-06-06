@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "KOReaderCredentialStore.h"
+#include "SystemFont.h"
 #include "activities/settings/SettingsActivity.h"
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
@@ -126,6 +127,16 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
                            StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_AURORA},
                           "uiTheme", StrId::STR_CAT_DISPLAY),
+        // System (UI) font face. Dynamic setter swaps the live UI font and clears
+        // the glyph cache so the change is visible without a reboot.
+        SettingInfo::DynamicEnum(
+            StrId::STR_SYSTEM_FONT, {StrId::STR_NOTO_SANS, StrId::STR_UBUNTU},
+            []() -> uint8_t { return SETTINGS.systemFont; },
+            [](uint8_t v) {
+              SETTINGS.systemFont = v < CrossPointSettings::SYSTEM_FONT_COUNT ? v : 0;
+              applySystemUiFont();
+            },
+            "systemFont", StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
 
@@ -168,10 +179,10 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           StrId::STR_CAT_CONTROLS),
         SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::frontButtonFollowOrientation,
                             "frontButtonFollowOrientation", StrId::STR_CAT_CONTROLS),
-        SettingInfo::Enum(StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints,
-                          {StrId::STR_BUTTON_HINTS_FRONT_ONLY, StrId::STR_BUTTON_HINTS_FRONT_EDGE,
-                           StrId::STR_BUTTON_HINTS_OFF},
-                          "showButtonHints", StrId::STR_CAT_CONTROLS),
+        SettingInfo::Enum(
+            StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints,
+            {StrId::STR_BUTTON_HINTS_FRONT_ONLY, StrId::STR_BUTTON_HINTS_FRONT_EDGE, StrId::STR_BUTTON_HINTS_OFF},
+            "showButtonHints", StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(StrId::STR_LONG_PRESS_BEHAVIOR, &CrossPointSettings::longPressButtonBehavior,
                           {StrId::STR_LONG_PRESS_BEHAVIOR_OFF, StrId::STR_LONG_PRESS_BEHAVIOR_SKIP,
                            StrId::STR_LONG_PRESS_BEHAVIOR_ORIENTATION},

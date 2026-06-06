@@ -25,6 +25,7 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "SystemFont.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -99,13 +100,34 @@ EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, 
 EpdFont smallFont(&notosans_8_regular);
 EpdFontFamily smallFontFamily(&smallFont);
 
-EpdFont ui10RegularFont(&ubuntu_10_regular);
-EpdFont ui10BoldFont(&ubuntu_10_bold);
-EpdFontFamily ui10FontFamily(&ui10RegularFont, &ui10BoldFont);
+// System (UI) font faces. Two selectable cuts back the UI_*_FONT_ID slots used
+// by every menu/status/home screen; applySystemUiFont() registers the one chosen
+// by SETTINGS.systemFont. Size is fixed (10 / 12) — only the typeface changes.
+//   Noto Sans  — the default Aurora look (notosansui_* + Hebrew fallback).
+//   Ubuntu     — the Vietnamese-localized Ubuntu cut (ubuntu_* + Hebrew fallback).
+EpdFont uiNoto10RegularFont(&notosansui_10_regular);
+EpdFont uiNoto10BoldFont(&notosansui_10_bold);
+EpdFontFamily uiNoto10FontFamily(&uiNoto10RegularFont, &uiNoto10BoldFont);
+EpdFont uiNoto12RegularFont(&notosansui_12_regular);
+EpdFont uiNoto12BoldFont(&notosansui_12_bold);
+EpdFontFamily uiNoto12FontFamily(&uiNoto12RegularFont, &uiNoto12BoldFont);
 
-EpdFont ui12RegularFont(&ubuntu_12_regular);
-EpdFont ui12BoldFont(&ubuntu_12_bold);
-EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
+EpdFont uiUbuntu10RegularFont(&ubuntu_10_regular);
+EpdFont uiUbuntu10BoldFont(&ubuntu_10_bold);
+EpdFontFamily uiUbuntu10FontFamily(&uiUbuntu10RegularFont, &uiUbuntu10BoldFont);
+EpdFont uiUbuntu12RegularFont(&ubuntu_12_regular);
+EpdFont uiUbuntu12BoldFont(&ubuntu_12_bold);
+EpdFontFamily uiUbuntu12FontFamily(&uiUbuntu12RegularFont, &uiUbuntu12BoldFont);
+
+// Register the UI face selected by SETTINGS.systemFont into the UI_*_FONT_ID
+// slots and drop cached glyphs so the swap is visible immediately. Called once
+// at boot and again whenever the System Font setting changes.
+void applySystemUiFont() {
+  const bool ubuntu = SETTINGS.systemFont == CrossPointSettings::SYS_FONT_UBUNTU;
+  renderer.replaceFont(UI_10_FONT_ID, ubuntu ? uiUbuntu10FontFamily : uiNoto10FontFamily);
+  renderer.replaceFont(UI_12_FONT_ID, ubuntu ? uiUbuntu12FontFamily : uiNoto12FontFamily);
+  fontCacheManager.clearCache();
+}
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
@@ -283,9 +305,8 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
   renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
-#endif  // OMIT_FONTS
-  renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
-  renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
+#endif                  // OMIT_FONTS
+  applySystemUiFont();  // registers UI_10/UI_12 with the face from SETTINGS.systemFont
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
 
   // Discover and load SD card fonts

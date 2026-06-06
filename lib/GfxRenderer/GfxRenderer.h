@@ -101,6 +101,11 @@ class GfxRenderer {
   // Setup
   void begin();  // must be called right after display.begin()
   void insertFont(int fontId, EpdFontFamily font);
+  // Overwrites any existing registration for fontId (insertFont refuses
+  // duplicates). Used to swap a built-in face at runtime — e.g. the system UI
+  // font. Callers should clear the glyph cache afterward so stale bitmaps for
+  // this id are not reused.
+  void replaceFont(int fontId, EpdFontFamily font) { fontMap.insert_or_assign(fontId, font); }
   // Clears both the flash-font map and any SD-font registration for fontId.
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free
   // the underlying SdCardFont and forget the SD-side unregister.
