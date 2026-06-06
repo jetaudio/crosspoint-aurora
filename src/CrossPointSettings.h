@@ -111,6 +111,12 @@ class CrossPointSettings {
     BUTTON_HINTS_MODE_COUNT
   };
 
+  // System (UI) font face. Picks which built-in face backs the UI_*_FONT_ID
+  // slots used by every menu/status/home screen. Size stays fixed; only the
+  // typeface changes. NOTO_SANS is the default Aurora look; UBUNTU is the
+  // Vietnamese-localized Ubuntu cut.
+  enum SYSTEM_FONT { SYS_FONT_NOTO_SANS = 0, SYS_FONT_UBUNTU = 1, SYSTEM_FONT_COUNT };
+
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { NOTOSERIF = 0, NOTOSANS = 1, FONT_FAMILY_COUNT };
   static constexpr uint8_t LEGACY_OPENDYSLEXIC = 2;
@@ -235,6 +241,8 @@ class CrossPointSettings {
   uint8_t frontButtonConfirm = FRONT_HW_CONFIRM;
   uint8_t frontButtonLeft = FRONT_HW_LEFT;
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
+  // System (UI) font face (SYSTEM_FONT). Default keeps the current Noto Sans look.
+  uint8_t systemFont = SYS_FONT_NOTO_SANS;
   // Reader font settings
   uint8_t fontFamily = NOTOSERIF;
   uint8_t fontSize = MEDIUM;
