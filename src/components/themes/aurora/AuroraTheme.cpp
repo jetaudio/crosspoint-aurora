@@ -28,21 +28,20 @@ namespace {
 constexpr int kStatusY = 12;       // Status bar text baseline (top of cell)
 constexpr int kDividerGap = 32;    // Distance from status text to the divider line
                                    // (sized for the large UI_12 page title)
-constexpr int kThumbHeight = 240;  // Featured cover thumbnail height (large, Lyra-style)
-constexpr int kThumbWidth = 160;   // Featured cover thumbnail width (~2:3)
+constexpr int kThumbHeight = 225;  // Featured cover thumbnail height (large, Lyra-style)
+constexpr int kThumbWidth = 150;   // Featured cover thumbnail width (~2:3)
 constexpr int kTextGap = 16;       // Gap between thumbnail and title block
 constexpr int kIconSize = 32;      // Placeholder cover glyph / bottom-bar icon size
 constexpr int kSectionGap = 28;    // Gap above the "Library" header
 constexpr int kBottomBarHeight = 70;
-constexpr int kProgBarHeight = 12;     // "Now Reading" progress bar height
+constexpr int kProgBarHeight = 10;     // "Now Reading" progress bar height
 constexpr int kCardHeight = 76;        // Recent-book card height
 constexpr int kCardGap = 8;            // Vertical gap between recent-book cards
-constexpr int kCardCoverW = 38;        // Card cover width (>= thumb width; height = homeCardCoverHeight)
+constexpr int kCardCoverW = 48;        // Card cover width (>= thumb width; height = homeCardCoverHeight)
 constexpr int kCardPad = 10;           // Gap between a card's cover and its text
 constexpr int kSettingRowHeight = 40;  // Settings value row height
 constexpr int kSettingValueCol = 150;  // Reserved width for the right value column
 constexpr int kSettingArrow = 7;       // Triangle arrow size for adjustable values
-constexpr int kHeaderFontId = UI_10_FONT_ID;
 constexpr int kTitleFontId = UI_12_FONT_ID;
 constexpr int kBodyFontId = UI_10_FONT_ID;
 // Settings rows use UI_10 (not the larger UI_12 of home/list titles) so the screen
@@ -115,16 +114,27 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: page title (left), clock (center, X3 only), battery (right), divider ---
-  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, tr(STR_LIBRARY));
+  // --- Status bar: clock (center, X3 only) + battery (right) + divider. No page title:
+  // the in-content overlines ("CONTINUE READING" / "LIBRARY") name the screen instead, so
+  // the status bar stays minimal and "Library" isn't shown twice. ---
+  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, nullptr);
 
-  // --- "Now Reading" featured card (recentBooks[0]) ---
+  // Section overline: a small caption-font label (the same idiom the settings groups use). The
+  // section whose zone holds the selection is drawn BOLD, the other REGULAR — a lightweight cue
+  // for which section Up/Down currently moves within (reinforcing the in-content highlight). Not
+  // upper-cased: an ASCII-only upper would mangle Vietnamese (ĐọC TIếP), and proper Unicode
+  // casing isn't worth a mapping table; the small bold weight reads as an overline on its own.
+  auto drawSectionLabel = [&](int x, int y, const char* text, bool active) {
+    renderer.drawText(kCaptionFontId, x, y, text, true, active ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  };
+
+  // --- "Continue Reading" featured card (recentBooks[0]) ---
   const int labelY = dividerY + 14;
-  renderer.drawText(kHeaderFontId, P, labelY, tr(STR_NOW_READING), true, EpdFontFamily::BOLD);
-
-  const int thumbY = labelY + renderer.getLineHeight(kHeaderFontId) + 8;
   const bool hasFeatured = !recentBooks.empty();
   const bool featuredSelected = listSelected == 0;
+  drawSectionLabel(P, labelY, tr(STR_HOME_CONTINUE), featuredSelected);
+
+  const int thumbY = labelY + renderer.getLineHeight(kCaptionFontId) + 8;
 
   // Draw a cached cover thumbnail into the given rect. The thumbnail is generated once by
   // HomeActivity at thumbHeight (the featured cover at homeCoverHeight, the small card covers
@@ -180,7 +190,7 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
 
     int blockHeight = static_cast<int>(titleLines.size()) * titleLineH;
     if (hasAuthor) blockHeight += bodyLineH + 6;
-    if (hasProgress) blockHeight += 12 + capLineH + 4 + kProgBarHeight;
+    if (hasProgress) blockHeight += 12 + std::max(capLineH, kProgBarHeight);
 
     int textY = thumbY + std::max(4, (kThumbHeight - blockHeight) / 2);
     for (const auto& line : titleLines) {
@@ -195,10 +205,14 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     }
     if (hasProgress) {
       textY += 12;
-      const std::string label = std::string(tr(STR_BOOK_PROGRESS)) + ": " + std::to_string(book.progressPercent) + "%";
-      renderer.drawText(kCaptionFontId, txtX, textY, label.c_str(), true, EpdFontFamily::BOLD);
-      textY += capLineH + 4;
-      drawProgressBar(txtX, textY, txtW, book.progressPercent);
+      // Compact progress row: a bar that fills the width left of an inline, right-aligned "NN%".
+      const std::string pct = std::to_string(book.progressPercent) + "%";
+      const int pctW = renderer.getTextWidth(kCaptionFontId, pct.c_str(), EpdFontFamily::BOLD);
+      const int rowH = std::max(capLineH, kProgBarHeight);
+      const int barW = std::max(20, txtW - pctW - 8);
+      drawProgressBar(txtX, textY + (rowH - kProgBarHeight) / 2, barW, book.progressPercent);
+      renderer.drawText(kCaptionFontId, txtX + barW + 8, textY + (rowH - capLineH) / 2, pct.c_str(), true,
+                        EpdFontFamily::BOLD);
     }
 
     // Selection emphasis around the whole card (double border).
@@ -211,26 +225,43 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
       renderer.drawRect(boxX + 1, boxY + 1, boxW - 2, boxH - 2);
     }
   } else {
-    const int emptyY = thumbY + (kThumbHeight - renderer.getLineHeight(kTitleFontId)) / 2;
-    renderer.drawCenteredText(kTitleFontId, emptyY, tr(STR_NO_OPEN_BOOK));
+    // Friendly empty state: a faint card outline holding a placeholder cover glyph, the
+    // "No open book" title, and a hint pointing at the Browse tab in the bottom bar.
+    const int boxX = P;
+    const int boxY = thumbY;
+    const int boxW = W - 2 * P;
+    const int boxH = kThumbHeight;
+    renderer.drawRoundedRect(boxX, boxY, boxW, boxH, 1, 12, true);
+    const int ic = 48;
+    const int titleLineH = renderer.getLineHeight(kTitleFontId);
+    const int capLineH = renderer.getLineHeight(kCaptionFontId);
+    const int groupH = ic + 12 + titleLineH + 6 + capLineH;
+    int ey = boxY + std::max(0, (boxH - groupH) / 2);
+    renderer.drawIcon(CoverIcon, boxX + (boxW - ic) / 2, ey, ic, ic);
+    ey += ic + 12;
+    renderer.drawCenteredText(kTitleFontId, ey, tr(STR_NO_OPEN_BOOK));
+    ey += titleLineH + 6;
+    renderer.drawCenteredText(kCaptionFontId, ey, tr(STR_HOME_EMPTY_HINT));
   }
 
-  // --- "Recent Books" header + card list (library = recentBooks[1..]) ---
-  // The page title is "Library", so this in-content section uses "Recent Books" to avoid
-  // showing "Library" twice. The list sits level with the right-edge arrow hints, so reserve
-  // that strip when the edge hints are shown (same inset the settings list uses).
+  // --- "Library" section header + card list (library = recentBooks[1..]) ---
+  // The status bar carries no page title, so this overline names the screen's library zone.
+  // A full-width hairline divider beneath separates it from the Continue Reading card above.
+  // The list sits level with the right-edge arrow hints, so reserve that strip when the edge
+  // hints are shown (same inset the settings list uses).
   const int rightInset = SETTINGS.showEdgeButtonHints() ? (metrics.sideButtonHintsWidth + 10) : 0;
-  const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
-  renderer.drawText(kHeaderFontId, P, libHeaderY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
-  const int underlineY = libHeaderY + renderer.getLineHeight(kHeaderFontId) + 4;
-  renderer.drawLine(P, underlineY, W - P - rightInset, underlineY);
-
-  const int barTop = content.height - kBottomBarHeight;
-  const int listTop = underlineY + 12;
   const int featuredOffset = hasFeatured ? 1 : 0;
   const int libBookCount = std::max(0, static_cast<int>(recentBooks.size()) - featuredOffset);
   // listSelected: 0 = featured card, 1.. = library row; map to the list's own index.
   const int librarySelected = listSelected >= 1 ? listSelected - 1 : -1;
+
+  const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
+  drawSectionLabel(P, libHeaderY, tr(STR_LIBRARY), librarySelected >= 0);
+  const int underlineY = libHeaderY + renderer.getLineHeight(kCaptionFontId) + 4;
+  renderer.drawLine(P, underlineY, W - P - rightInset, underlineY);
+
+  const int barTop = content.height - kBottomBarHeight;
+  const int listTop = underlineY + 12;
   const int listHeight = std::max(0, barTop - listTop);
 
   // Recent-book cards: cover (left) + title / author / read-% (right). No progress bar here
@@ -289,7 +320,7 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
           renderer.drawText(kCaptionFontId, infoRight - pctW, ty, pctText.c_str(), true, EpdFontFamily::BOLD);
         }
         if (hasAuthor) {
-          const int authorW = std::max(20, infoW - (hasProgress ? pctW + 10 : 0));
+          const int authorW = std::max(20, infoW - (hasProgress ? pctW + 12 : 0));
           const auto author = renderer.truncatedText(kCaptionFontId, book.author.c_str(), authorW);
           renderer.drawText(kCaptionFontId, infoX, ty, author.c_str());
         }
@@ -350,6 +381,21 @@ void AuroraTheme::drawBottomBar(GfxRenderer& renderer, Rect barRect, const std::
     renderer.drawText(kBarLabelFontId, centerX - labelWidth / 2, barTop + 10 + kIconSize + 2, label.c_str(), true,
                       style);
   }
+
+  // Small ◀ ▶ chevrons hugging the bar edges signal the whole tab bar is horizontally
+  // navigable (front Left/Right cycles tabs) — the cue that was previously invisible.
+  auto chevron = [&](int px, int cy, int size, bool pointLeft) {
+    if (pointLeft) {
+      renderer.drawLine(px + size, cy - size, px, cy);
+      renderer.drawLine(px, cy, px + size, cy + size);
+    } else {
+      renderer.drawLine(px - size, cy - size, px, cy);
+      renderer.drawLine(px, cy, px - size, cy + size);
+    }
+  };
+  const int chevronCy = barTop + barRect.height / 2;
+  chevron(barRect.x + 5, chevronCy, 4, true);
+  chevron(barRect.x + barRect.width - 5, chevronCy, 4, false);
 }
 
 void AuroraTheme::drawSettingsScreen(GfxRenderer& renderer, Rect content, const char* title,
