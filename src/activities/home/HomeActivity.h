@@ -19,10 +19,6 @@ class HomeActivity final : public Activity {
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
-  // E-ink anti-ghosting: home redraws the whole screen with FAST_REFRESH on every
-  // keystroke, so ghost residue accumulates. Every kHomeFullRefreshEvery-th paint
-  // (and the first paint after onEnter) uses a FULL_REFRESH to clear it.
-  uint8_t homeRefreshCounter = 0;
   bool hasOpdsServers = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
