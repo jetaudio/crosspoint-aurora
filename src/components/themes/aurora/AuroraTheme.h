@@ -14,11 +14,12 @@ constexpr ThemeMetrics values = [] {
   // Featured "Now Reading" cover is drawn large (~160x240, Lyra-style). Generate/
   // cache the thumbnail at that height so drawBitmap blits it ~1:1 instead of
   // crushing a 400px image down (nearest-neighbor downscale looked garbled).
-  v.homeCoverHeight = 240;
+  v.homeCoverHeight = 225;
   // Recent-book cards draw a small cover; generate that thumbnail at its display height so
-  // drawBitmap blits it ~1:1 (downscaling the big 240px thumbnail renders small covers black).
-  // Keep this equal to the card cover height used in AuroraTheme.cpp (drawHomeScreen).
-  v.homeCardCoverHeight = 60;
+  // drawBitmap blits it ~1:1 (downscaling the big 225px thumbnail renders small covers black).
+  // Keep this equal to the card cover height used in AuroraTheme.cpp (drawHomeScreen): it must
+  // be <= kCardHeight (76) and paired with kCardCoverW for the ~2:3 cover aspect.
+  v.homeCardCoverHeight = 72;
   // The NotoSans UI font is taller than the old Ubuntu one; give subtitle rows
   // (bookmarks, recent books, ...) a little more height so title + subtitle fit.
   v.listWithSubtitleRowHeight = 56;

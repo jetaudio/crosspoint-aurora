@@ -276,7 +276,12 @@ void HomeActivity::render(RenderLock&&) {
     // Side hints (2): Up/Down browse the list. Self-guarded (Front + Edge mode only).
     GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
-    renderer.displayBuffer();
+    // Anti-ghosting: first paint (fresh activity, e.g. returning from the reader)
+    // and every Nth redraw clear the panel with a full refresh; the rest stay fast.
+    constexpr int kHomeFullRefreshEvery = 8;
+    const bool fullRefresh = !firstRenderDone || homeRefreshCounter >= kHomeFullRefreshEvery;
+    renderer.displayBuffer(fullRefresh ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+    homeRefreshCounter = fullRefresh ? 0 : static_cast<uint8_t>(homeRefreshCounter + 1);
 
     if (!firstRenderDone) {
       firstRenderDone = true;
@@ -334,7 +339,11 @@ void HomeActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  renderer.displayBuffer();
+  // Anti-ghosting: first paint and every Nth redraw use a full refresh (see Aurora path above).
+  constexpr int kHomeFullRefreshEvery = 8;
+  const bool fullRefresh = !firstRenderDone || homeRefreshCounter >= kHomeFullRefreshEvery;
+  renderer.displayBuffer(fullRefresh ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
+  homeRefreshCounter = fullRefresh ? 0 : static_cast<uint8_t>(homeRefreshCounter + 1);
 
   if (!firstRenderDone) {
     firstRenderDone = true;
