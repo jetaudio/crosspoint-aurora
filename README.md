@@ -8,6 +8,26 @@ CrossPoint is open-source e-reader firmware - community-built, fully hackable, f
 
 ![CrossPoint Reader running on Xteink device](./docs/images/cover.jpg)
 
+---
+
+## 🌅 Aurora — bản fork tiếng Việt
+
+> Đây là nhánh **`aurora`**, một bản fork cá nhân của CrossPoint Reader hướng tới trải nghiệm đọc **tiếng Việt** trọn vẹn cùng một giao diện được làm lại. Nhánh `master` được giữ nguyên bản, đồng bộ với upstream; mọi tùy biến nằm ở nhánh `aurora` này.
+
+**Có gì khác so với bản gốc:**
+
+- **Giao diện Aurora** — một theme mới (chọn trong Cài đặt) làm lại màn hình chính: thanh trạng thái mỏng, thẻ **"Now Reading"** nổi bật, danh sách **"Library"** sách gần đây kiểu thẻ kèm tiến độ đọc, và **thanh tab biểu tượng ở đáy** (Duyệt tập tin / Sách gần đây / Cài đặt / Truyền tập tin).
+- **Điều hướng hai vùng** — nút **Lên/Xuống** bên hông duyệt danh sách; nút **Trái/Phải** mặt trước di chuyển thanh tab đáy. Có tùy chọn **hiện gợi ý phím** (tắt / chỉ mặt trước / mặt trước + cạnh).
+- **Tiếng Việt đầy đủ** — bản dịch giao diện tiếng Việt hoàn chỉnh và **phông UI phủ kín dấu tiếng Việt** (tái tạo từ Noto Sans). Chọn được **phông hệ thống**: Noto Sans hoặc Ubuntu (Vietnamese).
+- **Hiển thị tiếng Việt chuẩn** — tự **chuẩn hóa NFC** văn bản EPUB nên tiêu đề/nội dung dạng NFD vẫn hiện đúng dấu.
+- **Trình đọc EPUB làm lại** — trang sạch + thanh công cụ dạng overlay (Mục lục / Văn bản / Thêm), đổi phông áp dụng tức thì không cần mở lại sách.
+- **Tối ưu bộ nhớ flash** — chỉ biên dịch ngắt từ (hyphenation) cho các ngôn ngữ thực dùng (en/fr/es/it), tiết kiệm ~300 KB flash.
+- **Đánh thức nhanh** — không chặn khởi động chờ nhả nút nguồn, giao diện vẽ ngay.
+
+> 📌 Các PR tiếng Việt (bản dịch & phông) đã được đóng góp ngược lên upstream. Phần còn lại (theme Aurora, điều hướng hai vùng, trình đọc làm lại…) tiếp tục sống ở nhánh này.
+
+---
+
 ## What can CrossPoint do?
 
 - **Reader engine**: EPUB 2/3 rendering with embedded-style option, image handling, hyphenation, kerning, chapter navigation, footnotes, bookmarks, go-to-percent, auto page turn, orientation control, focus reading, KOReader progress sync and more. 
