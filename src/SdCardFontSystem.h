@@ -46,8 +46,16 @@ class SdCardFontSystem {
   }
 
  private:
+  // Keep the always-on Bookerly drop-cap face loaded in step with the reader's
+  // size setting. Loaded into a dedicated manager (independent of the user's
+  // body-font selection) so the enlarged chapter initial renders from a real
+  // large glyph instead of an integer-scaled body glyph. No-op when the family
+  // isn't on the card or drop caps are disabled.
+  void ensureDropCapLoaded(GfxRenderer& renderer);
+
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
+  SdCardFontManager dropCapManager_;
   std::atomic<bool> registryDirty_{false};
 };
 

@@ -16,11 +16,17 @@ struct SdCardFontFileInfo {
 struct SdCardFontFamilyInfo {
   std::string name;  // directory name, e.g. "NotoSansCJK"
   std::vector<SdCardFontFileInfo> files;
+  // Optional enlarged drop-cap faces for this family, discovered from a
+  // "<family>/dropcap/" subfolder (e.g. "/fonts/Bookerly/dropcap/Bookerly_76.cpfont").
+  // Regular-only, much larger point sizes. Empty when the family ships no drop-cap
+  // variant — the reader then falls back to integer-scaling the body glyph.
+  std::vector<SdCardFontFileInfo> dropCapFiles;
 
   const SdCardFontFileInfo* findFile(uint8_t size, uint8_t style = 0) const;
   const SdCardFontFileInfo* findClosestReaderSize(uint8_t fontSizeEnum, uint8_t style = 0) const;
   bool hasSize(uint8_t size) const;
   std::vector<uint8_t> availableSizes() const;
+  bool hasDropCap() const { return !dropCapFiles.empty(); }
 };
 
 class SdCardFontRegistry {
@@ -53,7 +59,10 @@ class SdCardFontRegistry {
   std::vector<SdCardFontFamilyInfo> families_;  // sorted alphabetically
 
   static bool parseFilename(const char* filename, uint8_t& size, uint8_t& style);
-  static void scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family);
+  // Append the .cpfont files in dirPath (non-recursive) to `out`, de-duplicating
+  // by (pointSize, style). Used for both the family's reading faces and its
+  // optional dropcap/ subfolder.
+  static void scanDirectory(const char* dirPath, std::vector<SdCardFontFileInfo>& out);
   // Scan one root (e.g. "/.fonts"), append families to `out`, dedup by name.
   static void scanRoot(const char* rootPath, std::vector<SdCardFontFamilyInfo>& out);
 };
