@@ -110,7 +110,7 @@ bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint
   return true;
 }
 
-void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo& family) {
+void SdCardFontRegistry::scanDirectory(const char* dirPath, std::vector<SdCardFontFileInfo>& out) {
   HalFile dir = Storage.open(dirPath);
   if (!dir || !dir.isDirectory()) return;
 
@@ -137,7 +137,7 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     // two files at the same size in the same family would silently shadow
     // each other in findFile(). Skip the duplicate and warn.
     bool duplicate = false;
-    for (const auto& existing : family.files) {
+    for (const auto& existing : out) {
       if (existing.pointSize == size && existing.style == style) {
         duplicate = true;
         break;
@@ -152,7 +152,7 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     info.path = std::string(dirPath) + "/" + nameBuffer;
     info.pointSize = size;
     info.style = style;
-    family.files.push_back(std::move(info));
+    out.push_back(std::move(info));
   }
 }
 
@@ -194,12 +194,17 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
       SdCardFontFamilyInfo family;
       family.name = nameBuffer;
       std::string subDirPath = std::string(rootPath) + "/" + nameBuffer;
-      SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family);
+      SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family.files);
+      // Optional enlarged drop-cap faces live in a "dropcap/" subfolder (ignored by
+      // the non-recursive scan above). Tied to this family: used only when this
+      // family is the selected reader font.
+      std::string dropCapPath = subDirPath + "/dropcap";
+      SdCardFontRegistry::scanDirectory(dropCapPath.c_str(), family.dropCapFiles);
 
       if (!family.files.empty()) {
         out.push_back(std::move(family));
-        LOG_DBG("SDREG", "Found family: %s (%d files) in %s", out.back().name.c_str(),
-                static_cast<int>(out.back().files.size()), rootPath);
+        LOG_DBG("SDREG", "Found family: %s (%d files, %d dropcap) in %s", out.back().name.c_str(),
+                static_cast<int>(out.back().files.size()), static_cast<int>(out.back().dropCapFiles.size()), rootPath);
       }
     } else {
       entry.close();
