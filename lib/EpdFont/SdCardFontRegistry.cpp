@@ -215,16 +215,11 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
       family.name = nameBuffer;
       std::string subDirPath = std::string(rootPath) + "/" + nameBuffer;
       SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family.files);
-      // Optional enlarged drop-cap faces live in a "dropcap/" subfolder (ignored by
-      // the non-recursive scan above). Tied to this family: used only when this
-      // family is the selected reader font.
-      std::string dropCapPath = subDirPath + "/dropcap";
-      SdCardFontRegistry::scanDirectory(dropCapPath.c_str(), family.dropCapFiles);
 
       if (!family.files.empty()) {
         out.push_back(std::move(family));
-        LOG_DBG("SDREG", "Found family: %s (%d files, %d dropcap) in %s", out.back().name.c_str(),
-                static_cast<int>(out.back().files.size()), static_cast<int>(out.back().dropCapFiles.size()), rootPath);
+        LOG_DBG("SDREG", "Found family: %s (%d files) in %s", out.back().name.c_str(),
+                static_cast<int>(out.back().files.size()), rootPath);
       }
     } else {
       entry.close();
@@ -232,14 +227,14 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
   }
 }
 
-bool SdCardFontRegistry::discover() {
+bool SdCardFontRegistry::discoverRoots(const char* hiddenRoot, const char* visibleRoot) {
   families_.clear();
   families_.reserve(MAX_SD_FAMILIES);
 
   // Hidden root is scanned first so it wins on name collisions, matching the
   // sleep-folder pattern (/.sleep preferred over /sleep).
-  scanRoot(FONTS_DIR_HIDDEN, families_);
-  scanRoot(FONTS_DIR_VISIBLE, families_);
+  scanRoot(hiddenRoot, families_);
+  scanRoot(visibleRoot, families_);
 
   // Sort families alphabetically
   std::sort(families_.begin(), families_.end(),
@@ -250,9 +245,14 @@ bool SdCardFontRegistry::discover() {
     families_.resize(MAX_SD_FAMILIES);
   }
 
-  LOG_DBG("SDREG", "Discovery complete: %d families", static_cast<int>(families_.size()));
+  LOG_DBG("SDREG", "Discovery complete: %d families (%s, %s)", static_cast<int>(families_.size()), hiddenRoot,
+          visibleRoot);
   return !families_.empty();
 }
+
+bool SdCardFontRegistry::discover() { return discoverRoots(FONTS_DIR_HIDDEN, FONTS_DIR_VISIBLE); }
+
+bool SdCardFontRegistry::discoverDropCaps() { return discoverRoots(DROPCAP_DIR_HIDDEN, DROPCAP_DIR_VISIBLE); }
 
 const char* SdCardFontRegistry::findFamilyRoot(const char* familyName) {
   if (!familyName || !*familyName) return nullptr;

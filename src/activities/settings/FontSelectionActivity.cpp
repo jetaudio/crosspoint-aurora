@@ -71,7 +71,10 @@ void FontSelectionActivity::onEnter() {
 void FontSelectionActivity::onExit() { Activity::onExit(); }
 
 void FontSelectionActivity::loop() {
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+  // Back/Confirm are handled on release (not press) to match the settings UI
+  // convention: the parent SettingsActivity navigates on release, so consuming the
+  // press here would let the release leak through and bounce it to the Library.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     SETTINGS.fontFamily = originalFontFamily_;
     strncpy(SETTINGS.sdFontFamilyName, originalSdFontFamilyName_, sizeof(SETTINGS.sdFontFamilyName) - 1);
     SETTINGS.sdFontFamilyName[sizeof(SETTINGS.sdFontFamilyName) - 1] = '\0';
@@ -80,7 +83,7 @@ void FontSelectionActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (selectedIndex_ == previewFontIndex_) {
       handleSelection();
     } else {
