@@ -265,7 +265,9 @@ void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
   // Handle actions with early return
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  // Open settings and submenus on release so the same button event cannot carry
+  // into a newly pushed activity and immediately select or close it.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (selectedSettingIndex == 0) {
       selectedCategoryIndex = (selectedCategoryIndex < categoryCount - 1) ? (selectedCategoryIndex + 1) : 0;
       hasChangedCategory = true;
