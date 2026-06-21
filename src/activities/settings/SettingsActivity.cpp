@@ -12,6 +12,7 @@
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
+#include "DropCapFontSelectionActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
@@ -39,21 +40,21 @@ namespace {
 uint32_t toUpperCodepoint(uint32_t cp) {
   if (cp >= 'a' && cp <= 'z') return cp - 32;                          // ASCII
   if (cp >= 0x00E0 && cp <= 0x00FE && cp != 0x00F7) return cp - 0x20;  // à–þ (skip ÷)
-  if (cp == 0x00FF) return 0x0178;                                    // ÿ → Ÿ
-  if (cp >= 0x0100 && cp <= 0x017F) {                                 // Latin Extended-A
-    if (cp == 0x0131) return 0x0049;                                  // ı → I
-    if (cp == 0x017F) return 0x0053;                                  // ſ → S
+  if (cp == 0x00FF) return 0x0178;                                     // ÿ → Ÿ
+  if (cp >= 0x0100 && cp <= 0x017F) {                                  // Latin Extended-A
+    if (cp == 0x0131) return 0x0049;                                   // ı → I
+    if (cp == 0x017F) return 0x0053;                                   // ſ → S
     if ((cp >= 0x0100 && cp <= 0x0137) || (cp >= 0x014A && cp <= 0x0177))
       return (cp & 1) ? cp - 1 : cp;  // upper is even (e.g. ă 0x0103 → Ă 0x0102, đ 0x0111 → Đ 0x0110)
     if ((cp >= 0x0139 && cp <= 0x0148) || (cp >= 0x0179 && cp <= 0x017E))
       return (cp & 1) ? cp : cp - 1;  // upper is odd
     return cp;
   }
-  if (cp == 0x01A1) return 0x01A0;  // ơ → Ơ
-  if (cp == 0x01B0) return 0x01AF;  // ư → Ư
+  if (cp == 0x01A1) return 0x01A0;                                  // ơ → Ơ
+  if (cp == 0x01B0) return 0x01AF;                                  // ư → Ư
   if (cp >= 0x1EA0 && cp <= 0x1EFF) return (cp & 1) ? cp - 1 : cp;  // Vietnamese tone marks: upper even
-  if (cp >= 0x0430 && cp <= 0x044F) return cp - 0x20;              // Cyrillic а–я
-  if (cp >= 0x0450 && cp <= 0x045F) return cp - 0x50;              // Cyrillic ѐ–џ
+  if (cp >= 0x0430 && cp <= 0x044F) return cp - 0x20;               // Cyrillic а–я
+  if (cp >= 0x0450 && cp <= 0x045F) return cp - 0x50;               // Cyrillic ѐ–џ
   return cp;
 }
 
@@ -137,7 +138,7 @@ void SettingsActivity::rebuildSettingsLists() {
   // reader activity ran — otherwise the font-family picker shows stale list.
   sdFontSystem.refreshIfDirty();
 
-  for (auto& setting : getSettingsList(&sdFontSystem.registry())) {
+  for (auto& setting : getSettingsList(&sdFontSystem.registry(), &sdFontSystem.dropCapRegistry())) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
@@ -362,6 +363,16 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
                              });
       return;
     }
+    if (setting.nameId == StrId::STR_DROP_CAP_FONT) {
+      // Launch the drop-cap font picker (preview + list) instead of cycling.
+      startActivityForResult(
+          std::make_unique<DropCapFontSelectionActivity>(renderer, mappedInput, &sdFontSystem.dropCapRegistry()),
+          [this](const ActivityResult&) {
+            SETTINGS.saveToFile();
+            rebuildSettingsLists();
+          });
+      return;
+    }
     const uint8_t totalValues = setting.enumStringValues.empty()
                                     ? static_cast<uint8_t>(setting.enumValues.size())
                                     : static_cast<uint8_t>(setting.enumStringValues.size());
@@ -569,6 +580,8 @@ bool SettingsActivity::isTopLevelSetting(StrId nameId) {
   switch (nameId) {
     case StrId::STR_FONT_FAMILY:
     case StrId::STR_MANAGE_FONTS:
+    case StrId::STR_DROP_CAPS:
+    case StrId::STR_DROP_CAP_FONT:
     case StrId::STR_FONT_SIZE:
     case StrId::STR_LINE_SPACING:
     case StrId::STR_SCREEN_MARGIN:
@@ -613,8 +626,9 @@ void SettingsActivity::buildAuroraEntries() {
   if (!advancedPage) {
     // Curated, important settings grouped into Reading / Display / Device
     // (section names match the reference design).
-    addSection(StrId::STR_SEC_READING, {StrId::STR_FONT_FAMILY, StrId::STR_MANAGE_FONTS, StrId::STR_FONT_SIZE,
-                                        StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
+    addSection(StrId::STR_SEC_READING,
+               {StrId::STR_FONT_FAMILY, StrId::STR_MANAGE_FONTS, StrId::STR_DROP_CAPS, StrId::STR_DROP_CAP_FONT,
+                StrId::STR_FONT_SIZE, StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
     addSection(StrId::STR_CAT_DISPLAY,
                {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ, StrId::STR_SHOW_BUTTON_HINTS});
     addSection(StrId::STR_CAT_DEVICE,
