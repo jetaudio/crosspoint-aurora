@@ -42,6 +42,7 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+static bool powerButtonReleasedAfterBoot = false;
 
 // Fonts
 EpdFont notoserif14RegularFont(&notoserif_14_regular);
@@ -488,13 +489,20 @@ void setup() {
     gpio.update();
     delay(10);
     gpio.update();
+  } else if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
+    // A normal sleep wake retains the wallpaper until the first activity
+    // physically refreshes the panel. Complete that paint before setup exits
+    // so the screen cannot remain on the retained sleep frame.
+    activityManager.requestUpdateAndWait();
   }
 
   // Fast wakeup: do NOT block here waiting for the power button to be released.
   // Returning now lets the first loop() iteration paint the target activity
   // while the button is still held, instead of leaving the panel frozen on the
-  // pre-boot (sleep-cover) frame until the user lets go. The allowSleepAt grace
-  // below keeps the still-held button from immediately re-triggering deep sleep.
+  // pre-boot (sleep-cover) frame until the user lets go. Use the physical GPIO
+  // level here because the debounced state can briefly report a false release
+  // during boot.
+  powerButtonReleasedAfterBoot = !gpio.isPowerButtonPhysicallyPressed();
   allowSleepAt = millis() + 2000;
 }
 
@@ -505,6 +513,10 @@ void loop() {
 
   gpio.update();
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
+
+  if (!powerButtonReleasedAfterBoot && !gpio.isPowerButtonPhysicallyPressed()) {
+    powerButtonReleasedAfterBoot = true;
+  }
 
   renderer.setFadingFix(SETTINGS.fadingFix);
 
@@ -571,8 +583,8 @@ void loop() {
     return;
   }
 
-  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
-      gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  if (powerButtonReleasedAfterBoot && millis() >= allowSleepAt && gpio.isPowerButtonPhysicallyPressed() &&
+      gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;
