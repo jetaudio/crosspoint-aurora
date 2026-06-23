@@ -18,6 +18,18 @@ void utf8TruncateChars(std::string& str, size_t numChars);
 // stored in NFD (e.g. some EPUB chapter titles) otherwise renders broken.
 std::string utf8ComposeNfc(const std::string& in);
 
+// Simple (1:1) Unicode uppercase of a single codepoint. Covers ASCII, Latin-1
+// Supplement, the common Latin Extended-A/-B letters (incl. Vietnamese Ă/Đ/Ơ/Ư),
+// Latin Extended Additional (Vietnamese tone-marked letters), Greek and Cyrillic.
+// Codepoints outside these ranges (and non-letters) are returned unchanged, so it
+// never throws and degrades to a no-op for unsupported scripts. Not locale-aware
+// and does not expand (e.g. ß stays ß) — intended for the small-caps first line.
+uint32_t utf8ToUpperCodepoint(uint32_t cp);
+
+// Returns an uppercased copy of a UTF-8 string using utf8ToUpperCodepoint per
+// codepoint. Bytes that do not start a valid codepoint are preserved as-is.
+std::string utf8ToUpper(const std::string& in);
+
 // Truncate a raw char buffer to the last complete UTF-8 codepoint boundary.
 // Returns the new length (<= len). If the buffer ends mid-sequence, the
 // incomplete trailing bytes are excluded.

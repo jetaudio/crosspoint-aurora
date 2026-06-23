@@ -49,8 +49,13 @@ class ChapterHtmlSlimParser {
   bool hyphenationEnabled;
   bool focusReadingEnabled;
   bool dropCapsEnabled;
+  // Small Caps: render the chapter's opening line in all-caps. Shares the opening-paragraph
+  // detection (arming/candidate) with drop caps but commits independently.
+  bool smallCapsEnabled;
+  bool smallCapsDone = false;
   // Drop-cap state: armed when the chapter's first <p> opens, consumed when its text
-  // block is created (so only that paragraph gets the enlarged initial).
+  // block is created (so only that paragraph gets the enlarged initial). The arm is shared:
+  // it fires when either drop caps or small caps still needs the opening paragraph.
   bool dropCapArmed = false;
   bool dropCapDone = false;
   // Cross-paragraph wrap: a cap can be taller than its own (short) paragraph, so the
@@ -133,6 +138,7 @@ class ChapterHtmlSlimParser {
                                  const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                  const uint16_t viewportHeight, const bool hyphenationEnabled,
                                  const bool focusReadingEnabled, const bool dropCapsEnabled,
+                                 const bool smallCapsEnabled,
                                  const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)>& completePageFn,
                                  const bool embeddedStyle, const std::string& contentBase,
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,
@@ -151,6 +157,7 @@ class ChapterHtmlSlimParser {
         hyphenationEnabled(hyphenationEnabled),
         focusReadingEnabled(focusReadingEnabled),
         dropCapsEnabled(dropCapsEnabled),
+        smallCapsEnabled(smallCapsEnabled),
         completePageFn(completePageFn),
         popupFn(popupFn),
         cssParser(cssParser),

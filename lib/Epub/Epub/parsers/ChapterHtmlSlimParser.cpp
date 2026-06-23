@@ -357,9 +357,10 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
   if (strcmp(name, "p") == 0) {
     self->xpathParagraphIndex++;
-    // Arm the drop cap for the chapter's first paragraph only. Consumed (and the block
-    // marked) in startNewTextBlock when this <p>'s text block is created.
-    if (self->dropCapsEnabled && !self->dropCapDone) {
+    // Arm the opening-paragraph decoration for the chapter's first paragraph only. Consumed
+    // (and the block marked) in startNewTextBlock when this <p>'s text block is created. The
+    // arm is shared by drop caps and small caps; either feature still wanting it re-arms.
+    if ((self->dropCapsEnabled && !self->dropCapDone) || (self->smallCapsEnabled && !self->smallCapsDone)) {
       self->dropCapArmed = true;
     }
   }
@@ -1490,9 +1491,9 @@ void ChapterHtmlSlimParser::makePages() {
     currentPageNextY = 0;
   }
 
-  // Chapter title handling (drop-cap feature): remember the first heading's text, and drop
-  // a body paragraph that merely repeats it so the drop cap lands on the real opening line.
-  if (dropCapsEnabled) {
+  // Chapter title handling (drop-cap / small-caps): remember the first heading's text, and drop
+  // a body paragraph that merely repeats it so the decoration lands on the real opening line.
+  if (dropCapsEnabled || smallCapsEnabled) {
     if (currentBlockIsHeading) {
       if (chapterTitle.empty()) {
         chapterTitle = currentTextBlock->getPlainText();
@@ -1526,7 +1527,7 @@ void ChapterHtmlSlimParser::makePages() {
   DropCapSpec dropCapSpec;
   DropCapSpec dropCapWrapSpec;
   const DropCapSpec* dropCapPtr = nullptr;
-  if (currentTextBlock->isDropCapCandidate() && !dropCapDone) {
+  if (dropCapsEnabled && currentTextBlock->isDropCapCandidate() && !dropCapDone) {
     std::string capText;
     uint32_t letterCp = 0;
     EpdFontFamily::Style letterStyle = EpdFontFamily::REGULAR;
@@ -1595,9 +1596,19 @@ void ChapterHtmlSlimParser::makePages() {
     }
   }
 
+  // Small caps: render the chapter's opening line in all-caps. It targets the same opening
+  // paragraph as the drop cap (so the two compose: enlarged initial + uppercased rest of the
+  // first line) and commits once per chapter.
+  bool applySmallCaps = false;
+  if (smallCapsEnabled && currentTextBlock->isDropCapCandidate() && !smallCapsDone) {
+    applySmallCaps = true;
+    smallCapsDone = true;
+  }
+
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
-      [this](const std::shared_ptr<TextBlock>& textBlock) { addLineToPage(textBlock); }, true, dropCapPtr);
+      [this](const std::shared_ptr<TextBlock>& textBlock) { addLineToPage(textBlock); }, true, dropCapPtr,
+      applySmallCaps);
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches

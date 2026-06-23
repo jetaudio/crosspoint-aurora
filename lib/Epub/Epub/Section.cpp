@@ -22,11 +22,13 @@ namespace {
 //   - dropCapFontId in the header: the chosen /.dropcap face is independent of the
 //     reader font, so its identity (which drives the cap's wrap inset) must key the
 //     cache too — re-paginates when the drop-cap font changes.
-constexpr uint8_t SECTION_FILE_VERSION = 31;
+//   - smallCapsEnabled flag in the header: uppercasing the chapter's opening line
+//     changes its line breaks, so toggling it must re-paginate.
+constexpr uint8_t SECTION_FILE_VERSION = 32;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(bool) + sizeof(bool) + sizeof(int) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+                                 sizeof(uint8_t) + sizeof(bool) + sizeof(bool) + sizeof(int) + sizeof(bool) +
+                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
 
 struct PageLutEntry {
   uint32_t fileOffset;
@@ -56,7 +58,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                      const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                      const uint16_t viewportHeight, const bool hyphenationEnabled,
                                      const bool embeddedStyle, const uint8_t imageRendering,
-                                     const bool focusReadingEnabled, const bool dropCapsEnabled) {
+                                     const bool focusReadingEnabled, const bool dropCapsEnabled,
+                                     const bool smallCapsEnabled) {
   if (!file) {
     LOG_DBG("SCT", "File not open for writing header");
     return;
@@ -69,8 +72,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                    sizeof(extraParagraphSpacing) + sizeof(paragraphAlignment) + sizeof(viewportWidth) +
                                    sizeof(viewportHeight) + sizeof(pageCount) + sizeof(hyphenationEnabled) +
                                    sizeof(embeddedStyle) + sizeof(imageRendering) + sizeof(focusReadingEnabled) +
-                                   sizeof(dropCapsEnabled) + sizeof(dropCapFontId) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(dropCapsEnabled) + sizeof(dropCapFontId) + sizeof(smallCapsEnabled) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
@@ -85,6 +88,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, focusReadingEnabled);
   serialization::writePod(file, dropCapsEnabled);
   serialization::writePod(file, dropCapFontId);
+  serialization::writePod(file, smallCapsEnabled);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -95,8 +99,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
 bool Section::loadSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
                               const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                               const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
-                              const uint8_t imageRendering, const bool focusReadingEnabled,
-                              const bool dropCapsEnabled) {
+                              const uint8_t imageRendering, const bool focusReadingEnabled, const bool dropCapsEnabled,
+                              const bool smallCapsEnabled) {
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     return false;
   }
@@ -124,6 +128,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     bool fileFocusReadingEnabled;
     bool fileDropCapsEnabled;
     int fileDropCapFontId;
+    bool fileSmallCapsEnabled;
     serialization::readPod(file, fileFontId);
     serialization::readPod(file, fileLineCompression);
     serialization::readPod(file, fileExtraParagraphSpacing);
@@ -136,6 +141,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     serialization::readPod(file, fileFocusReadingEnabled);
     serialization::readPod(file, fileDropCapsEnabled);
     serialization::readPod(file, fileDropCapFontId);
+    serialization::readPod(file, fileSmallCapsEnabled);
 
     // Must match the face that would be used now (0 when disabled/none) — see
     // writeSectionFileHeader. The drop-cap font is independent of the reader font.
@@ -145,7 +151,8 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
         viewportWidth != fileViewportWidth || viewportHeight != fileViewportHeight ||
         hyphenationEnabled != fileHyphenationEnabled || embeddedStyle != fileEmbeddedStyle ||
         imageRendering != fileImageRendering || focusReadingEnabled != fileFocusReadingEnabled ||
-        dropCapsEnabled != fileDropCapsEnabled || dropCapFontId != fileDropCapFontId) {
+        dropCapsEnabled != fileDropCapsEnabled || dropCapFontId != fileDropCapFontId ||
+        smallCapsEnabled != fileSmallCapsEnabled) {
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();
@@ -180,7 +187,8 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
                                 const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                 const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
                                 const uint8_t imageRendering, const bool focusReadingEnabled,
-                                const bool dropCapsEnabled, const std::function<void()>& popupFn) {
+                                const bool dropCapsEnabled, const bool smallCapsEnabled,
+                                const std::function<void()>& popupFn) {
   const auto localPath = epub->getSpineItem(spineIndex).href;
   const auto tmpHtmlPath = epub->getCachePath() + "/.tmp_" + std::to_string(spineIndex) + ".html";
 
@@ -232,7 +240,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, focusReadingEnabled,
-                         dropCapsEnabled);
+                         dropCapsEnabled, smallCapsEnabled);
   std::vector<PageLutEntry> lut = {};
 
   // Derive the content base directory and image cache path prefix for the parser
@@ -265,7 +273,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   ChapterHtmlSlimParser visitor(
       epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
-      viewportHeight, hyphenationEnabled, focusReadingEnabled, dropCapsEnabled,
+      viewportHeight, hyphenationEnabled, focusReadingEnabled, dropCapsEnabled, smallCapsEnabled,
       [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
         lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
       },

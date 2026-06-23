@@ -178,3 +178,54 @@ void utf8TruncateChars(std::string& str, const size_t numChars) {
     utf8RemoveLastChar(str);
   }
 }
+
+uint32_t utf8ToUpperCodepoint(const uint32_t cp) {
+  // ASCII a-z
+  if (cp >= 'a' && cp <= 'z') return cp - 0x20;
+
+  // Latin-1 Supplement lowercase (à-þ), excluding ÷ (0xF7, not a letter). ß (0xDF)
+  // has no single-codepoint uppercase, so it is left unchanged.
+  if (cp >= 0x00E0 && cp <= 0x00FE && cp != 0x00F7) return cp - 0x20;
+  if (cp == 0x00FF) return 0x0178;  // ÿ -> Ÿ
+
+  // Latin Extended-A: parity differs per sub-block (upper is the even codepoint in
+  // some ranges, the odd one in others).
+  if (cp == 0x0131) return 0x0049;                                   // ı -> I
+  if (cp == 0x017F) return 0x0053;                                   // ſ (long s) -> S
+  if (cp >= 0x0100 && cp <= 0x0137) return (cp & 1u) ? cp - 1 : cp;  // even=upper (incl. ă 0x0103 -> 0x0102)
+  if (cp >= 0x0139 && cp <= 0x0148) return (cp & 1u) ? cp : cp - 1;  // odd=upper
+  if (cp >= 0x014A && cp <= 0x0177) return (cp & 1u) ? cp - 1 : cp;  // even=upper
+  if (cp == 0x017A || cp == 0x017C || cp == 0x017E) return cp - 1;   // ź ż ž
+  if (cp == 0x0153) return 0x0152;                                   // œ -> Œ
+
+  // Latin Extended-B (Vietnamese horned vowels)
+  if (cp == 0x01A1) return 0x01A0;  // ơ -> Ơ
+  if (cp == 0x01B0) return 0x01AF;  // ư -> Ư
+
+  // Greek (monotonic): α-ω, with final sigma mapping to Σ.
+  if (cp == 0x03C2) return 0x03A3;  // ς -> Σ
+  if (cp >= 0x03B1 && cp <= 0x03C9) return cp - 0x20;
+
+  // Cyrillic
+  if (cp >= 0x0430 && cp <= 0x044F) return cp - 0x20;
+  if (cp >= 0x0450 && cp <= 0x045F) return cp - 0x50;
+
+  // Latin Extended Additional (Vietnamese tone-marked letters): upper is the even
+  // codepoint throughout 0x1E00-0x1EFF.
+  if (cp >= 0x1E00 && cp <= 0x1EFF) return (cp & 1u) ? cp - 1 : cp;
+
+  return cp;
+}
+
+std::string utf8ToUpper(const std::string& in) {
+  std::string out;
+  out.reserve(in.size());
+  const auto* p = reinterpret_cast<const unsigned char*>(in.c_str());
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(&p)) != 0) {
+    // Non-letter and unsupported codepoints (including a literal U+FFFD from an
+    // undecodable byte) map to themselves, so the output stays well-formed.
+    utf8AppendCodepoint(utf8ToUpperCodepoint(cp), out);
+  }
+  return out;
+}

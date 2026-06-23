@@ -211,6 +211,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                             StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_DROP_CAPS, &CrossPointSettings::dropCapsEnabled, "dropCapsEnabled",
                             StrId::STR_CAT_READER),
+        SettingInfo::Toggle(StrId::STR_SMALL_CAPS, &CrossPointSettings::smallCapsFirstLine, "smallCapsFirstLine",
+                            StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
                             StrId::STR_CAT_READER),
         SettingInfo::Enum(

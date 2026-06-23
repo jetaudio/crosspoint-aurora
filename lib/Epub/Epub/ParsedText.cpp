@@ -561,10 +561,11 @@ void ParsedText::stripLeadingCodepoints(size_t count) {
 // Consumes data to minimize memory usage
 void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
                                        const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
-                                       const bool includeLastLine, const DropCapSpec* dropCap) {
+                                       const bool includeLastLine, const DropCapSpec* dropCap, const bool smallCaps) {
   if (words.empty()) {
     return;
   }
+  smallCaps_ = smallCaps;
 
   // Drop cap: pull the cap prefix (the enlarged initial, plus any leading opening quote)
   // out of the leading words so it is not drawn twice — the cap is rendered separately by
@@ -621,15 +622,24 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     }
     if (styleMask == 0) styleMask = 0x01;  // defensive: regular only
     renderer.ensureSdCardFontReady(fontId, words, hyphenationEnabled, styleMask);
+    if (smallCaps_) {
+      // The small-caps line uppercases its words, so preload the advances for the
+      // uppercase codepoints too (otherwise measuring them would miss SD glyph metrics).
+      std::vector<std::string> upperWords;
+      upperWords.reserve(words.size());
+      for (const auto& w : words) upperWords.push_back(utf8ToUpper(w));
+      renderer.ensureSdCardFontReady(fontId, upperWords, hyphenationEnabled, styleMask);
+    }
   }
 
   const int pageWidth = viewportWidth;
   auto wordWidths = calculateWordWidths(renderer, fontId);
 
   std::vector<size_t> lineBreakIndices;
-  if (dropCap_) {
-    // Drop-cap paragraphs need a per-line-ordinal inset, which the DP breaker can't
-    // express (it only varies width on the first line). Use the greedy breaker.
+  if (dropCap_ || smallCaps_) {
+    // Decorated opening paragraphs use the greedy, ordinal-aware breaker: drop caps need a
+    // per-line inset and small caps need line 0 measured in its wider uppercase form —
+    // neither of which the DP breaker can express (it only varies width on the first line).
     lineBreakIndices =
         computeDropCapLineBreaks(renderer, fontId, pageWidth, wordWidths, wordContinues, hyphenationEnabled);
   } else if (hyphenationEnabled) {
@@ -665,6 +675,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fo
     wordIsFocusSuffix.erase(wordIsFocusSuffix.begin(), wordIsFocusSuffix.begin() + consumed);
   }
   dropCap_ = nullptr;
+  smallCaps_ = false;
 }
 
 std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
@@ -878,30 +889,68 @@ std::vector<size_t> ParsedText::computeDropCapLineBreaks(const GfxRenderer& rend
   size_t currentIndex = 0;
   size_t lineOrdinal = 0;
 
+  // Small caps: on line ordinal 0 each word is uppercased and re-measured as it is placed,
+  // so the line breaks around the wider glyphs. The committed words/widths are mutated in
+  // place (extractLine then renders and positions the uppercase form). Originals are stashed
+  // so a continuation-group pullback at the line-0 boundary can restore the lowercase form
+  // for a word that ends up on line 1.
+  std::vector<std::pair<size_t, std::string>> scStashWord;
+  std::vector<uint16_t> scStashWidth;
+
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
     int lineWidth = 0;
+    const bool upperLine = smallCaps_ && lineOrdinal == 0;
     const int effectivePageWidth = pageWidth - lineLeftInset(lineOrdinal, renderer, fontId);
 
     while (currentIndex < wordWidths.size()) {
       const bool isFirstWord = currentIndex == lineStart;
+
+      // Resolve this candidate's effective form/width. On the small-caps line we measure the
+      // uppercase variant; it is only written back into words/wordWidths once the word is
+      // actually committed to line 0 (so a word pushed to line 1 stays lowercase).
+      uint16_t candWordWidth = wordWidths[currentIndex];
+      std::string upWord;
+      bool upChanged = false;
+      uint32_t candFirstCp = firstCodepoint(words[currentIndex]);
+      if (upperLine) {
+        upWord = utf8ToUpper(words[currentIndex]);
+        upChanged = upWord != words[currentIndex];
+        if (upChanged) {
+          candWordWidth = measureWordWidth(renderer, fontId, upWord, wordStyles[currentIndex]);
+          candFirstCp = firstCodepoint(upWord);
+        }
+      }
+
       int spacing = 0;
       if (!isFirstWord && !continuesVec[currentIndex]) {
-        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
-                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
+        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]), candFirstCp,
+                                           wordStyles[currentIndex - 1]);
       } else if (!isFirstWord && continuesVec[currentIndex]) {
-        spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]),
-                                      firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
+        spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]), candFirstCp,
+                                      wordStyles[currentIndex - 1]);
       }
-      const int candidateWidth = spacing + wordWidths[currentIndex];
+      const int candidateWidth = spacing + candWordWidth;
+
+      const auto commitUpper = [&]() {
+        if (upChanged) {
+          scStashWord.emplace_back(currentIndex, words[currentIndex]);
+          scStashWidth.push_back(wordWidths[currentIndex]);
+          words[currentIndex] = upWord;
+          wordWidths[currentIndex] = candWordWidth;
+        }
+      };
 
       if (lineWidth + candidateWidth <= effectivePageWidth) {
+        commitUpper();
         lineWidth += candidateWidth;
         ++currentIndex;
         continue;
       }
 
-      if (allowHyphenation) {
+      // Skip hyphenation on the small-caps opening line so an uppercased word is never split
+      // with its tail bleeding onto the following (lowercase) line.
+      if (allowHyphenation && !upperLine) {
         const int availableWidth = effectivePageWidth - lineWidth - spacing;
         const bool allowFallbackBreaks = isFirstWord;
         if (availableWidth > 0 &&
@@ -914,6 +963,7 @@ std::vector<size_t> ParsedText::computeDropCapLineBreaks(const GfxRenderer& rend
 
       // Force at least one word per line to avoid an infinite loop on an oversized word.
       if (currentIndex == lineStart) {
+        commitUpper();
         lineWidth += candidateWidth;
         ++currentIndex;
       }
@@ -923,6 +973,19 @@ std::vector<size_t> ParsedText::computeDropCapLineBreaks(const GfxRenderer& rend
     // Don't break before a continuation word; pull the whole group to the next line.
     while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
       --currentIndex;
+    }
+
+    // Restore the lowercase form of any uppercased word the pullback moved off line 0.
+    if (upperLine) {
+      for (size_t k = 0; k < scStashWord.size(); ++k) {
+        const size_t idx = scStashWord[k].first;
+        if (idx >= currentIndex) {
+          words[idx] = scStashWord[k].second;
+          wordWidths[idx] = scStashWidth[k];
+        }
+      }
+      scStashWord.clear();
+      scStashWidth.clear();
     }
 
     lineBreakIndices.push_back(currentIndex);

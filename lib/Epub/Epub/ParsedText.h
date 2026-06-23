@@ -78,6 +78,10 @@ class ParsedText {
   // Non-owning; valid only for the duration of a layoutAndExtractLines() call.
   const DropCapSpec* dropCap_ = nullptr;
   bool dropCapCandidate_ = false;
+  // When true, the first emitted line (line ordinal 0) is rendered in all-caps: its words
+  // are uppercased and re-measured during line breaking. Set only for the duration of a
+  // layoutAndExtractLines() call. Composes with dropCap_ (cap + uppercased rest of line 0).
+  bool smallCaps_ = false;
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
@@ -104,7 +108,7 @@ class ParsedText {
   bool isEmpty() const { return words.empty(); }
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
-                             bool includeLastLine = true, const DropCapSpec* dropCap = nullptr);
+                             bool includeLastLine = true, const DropCapSpec* dropCap = nullptr, bool smallCaps = false);
   // Builds the drop-cap prefix: up to two leading opening-punctuation codepoints (e.g. a
   // quote) followed by exactly one letter, scanning across continuation-joined leading
   // words. Returns the prefix (NFC, ready to render), the cap letter, and its style.

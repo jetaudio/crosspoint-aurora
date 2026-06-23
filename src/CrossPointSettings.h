@@ -281,6 +281,8 @@ class CrossPointSettings {
   uint8_t focusReadingEnabled = 0;
   // Drop Caps - enlarged decorative initial on the first paragraph of each chapter
   uint8_t dropCapsEnabled = 1;
+  // Small Caps - render the first line of each chapter's opening paragraph in all-caps
+  uint8_t smallCapsFirstLine = 0;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
   // Drop-cap font family name, loaded from the standalone /.dropcap folder on the
