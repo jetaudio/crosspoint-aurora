@@ -1604,7 +1604,7 @@ void EpubReaderActivity::openClassicReaderMenu() {
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
   startActivityForResult(std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage,
                                                                   totalPages, bookProgressPercent, SETTINGS.orientation,
-                                                                  !currentPageFootnotes.empty()),
+                                                                  !currentPageFootnotes.empty(), !cachedBookmarks.empty()),
                          [this](const ActivityResult& result) {
                            // Always apply orientation change even if the menu was cancelled
                            const auto& menu = std::get<MenuResult>(result.data);

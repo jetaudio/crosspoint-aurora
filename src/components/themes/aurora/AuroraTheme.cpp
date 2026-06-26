@@ -114,11 +114,6 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   const int W = content.width;
   const int P = metrics.contentSidePadding;
 
-  // --- Status bar: clock (center, X3 only) + battery (right) + divider. No page title:
-  // the in-content overlines ("CONTINUE READING" / "LIBRARY") name the screen instead, so
-  // the status bar stays minimal and "Library" isn't shown twice. ---
-  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, nullptr);
-
   // Section overline: a small caption-font label (the same idiom the settings groups use). The
   // section whose zone holds the selection is drawn BOLD, the other REGULAR — a lightweight cue
   // for which section Up/Down currently moves within (reinforcing the in-content highlight). Not
@@ -128,13 +123,31 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     renderer.drawText(kCaptionFontId, x, y, text, true, active ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
   };
 
-  // --- "Continue Reading" featured card (recentBooks[0]) ---
-  const int labelY = dividerY + 14;
+  // --- Merged header: "Continue Reading" label (left) + clock (X3 only, center) +
+  // battery (right) + divider. Folds the old blank status bar into the section label
+  // so the two rows become one, reclaiming vertical space for the featured card. ---
   const bool hasFeatured = !recentBooks.empty();
   const bool featuredSelected = listSelected == 0;
-  drawSectionLabel(P, labelY, tr(STR_HOME_CONTINUE), featuredSelected);
+  const int textY = content.y + kStatusY;
+  drawSectionLabel(P, textY, tr(STR_HOME_CONTINUE), featuredSelected);
 
-  const int thumbY = labelY + renderer.getLineHeight(kCaptionFontId) + 8;
+  if (gpio.deviceIsX3() && SETTINGS.statusBarClock && halClock.isAvailable()) {
+    char timeBuf[9];
+    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
+      renderer.drawCenteredText(kCaptionFontId, textY, timeBuf);
+    }
+  }
+
+  const bool showBatteryPercentage =
+      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
+  drawBatteryRight(renderer,
+                   Rect{content.x + W - P - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
+                   showBatteryPercentage);
+
+  const int dividerY = textY + kDividerGap;
+  renderer.drawLine(content.x + P, dividerY, content.x + W - P, dividerY);
+
+  const int thumbY = dividerY + 8;
 
   // Draw a cached cover thumbnail into the given rect. The thumbnail is generated once by
   // HomeActivity at thumbHeight (the featured cover at homeCoverHeight, the small card covers
