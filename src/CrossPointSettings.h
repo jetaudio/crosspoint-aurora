@@ -117,7 +117,13 @@ class CrossPointSettings {
   // slots used by every menu/status/home screen. Size stays fixed; only the
   // typeface changes. NOTO_SANS is the default Aurora look; UBUNTU is the
   // Vietnamese-localized Ubuntu cut.
-  enum SYSTEM_FONT { SYS_FONT_NOTO_SANS = 0, SYS_FONT_UBUNTU = 1, SYSTEM_FONT_COUNT };
+  enum SYSTEM_FONT {
+    SYS_FONT_NOTO_SANS = 0,
+    SYS_FONT_UBUNTU = 1,
+    SYS_FONT_EB_GARAMOND = 2,
+    SYS_FONT_SFU_GOUDY = 3,
+    SYSTEM_FONT_COUNT
+  };
 
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { NOTOSERIF = 0, NOTOSANS = 1, FONT_FAMILY_COUNT };

@@ -179,7 +179,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         // System (UI) font face. Dynamic setter swaps the live UI font and clears
         // the glyph cache so the change is visible without a reboot.
         SettingInfo::DynamicEnum(
-            StrId::STR_SYSTEM_FONT, {StrId::STR_NOTO_SANS, StrId::STR_UBUNTU},
+            StrId::STR_SYSTEM_FONT,
+            {StrId::STR_NOTO_SANS, StrId::STR_UBUNTU, StrId::STR_EB_GARAMOND, StrId::STR_SFU_GOUDY},
             []() -> uint8_t { return SETTINGS.systemFont; },
             [](uint8_t v) {
               SETTINGS.systemFont = v < CrossPointSettings::SYSTEM_FONT_COUNT ? v : 0;

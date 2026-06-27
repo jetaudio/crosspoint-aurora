@@ -120,13 +120,34 @@ EpdFont uiUbuntu12RegularFont(&ubuntu_12_regular);
 EpdFont uiUbuntu12BoldFont(&ubuntu_12_bold);
 EpdFontFamily uiUbuntu12FontFamily(&uiUbuntu12RegularFont, &uiUbuntu12BoldFont);
 
+EpdFont uiGaramond10RegularFont(&ebgaramond_10_regular);
+EpdFont uiGaramond10BoldFont(&ebgaramond_10_bold);
+EpdFontFamily uiGaramond10FontFamily(&uiGaramond10RegularFont, &uiGaramond10BoldFont);
+EpdFont uiGaramond12RegularFont(&ebgaramond_12_regular);
+EpdFont uiGaramond12BoldFont(&ebgaramond_12_bold);
+EpdFontFamily uiGaramond12FontFamily(&uiGaramond12RegularFont, &uiGaramond12BoldFont);
+
+EpdFont uiGoudy10RegularFont(&sfugoudy_10_regular);
+EpdFont uiGoudy10BoldFont(&sfugoudy_10_bold);
+EpdFontFamily uiGoudy10FontFamily(&uiGoudy10RegularFont, &uiGoudy10BoldFont);
+EpdFont uiGoudy12RegularFont(&sfugoudy_12_regular);
+EpdFont uiGoudy12BoldFont(&sfugoudy_12_bold);
+EpdFontFamily uiGoudy12FontFamily(&uiGoudy12RegularFont, &uiGoudy12BoldFont);
+
 // Register the UI face selected by SETTINGS.systemFont into the UI_*_FONT_ID
 // slots and drop cached glyphs so the swap is visible immediately. Called once
 // at boot and again whenever the System Font setting changes.
 void applySystemUiFont() {
-  const bool ubuntu = SETTINGS.systemFont == CrossPointSettings::SYS_FONT_UBUNTU;
-  renderer.replaceFont(UI_10_FONT_ID, ubuntu ? uiUbuntu10FontFamily : uiNoto10FontFamily);
-  renderer.replaceFont(UI_12_FONT_ID, ubuntu ? uiUbuntu12FontFamily : uiNoto12FontFamily);
+  const EpdFontFamily* f10 = &uiNoto10FontFamily;
+  const EpdFontFamily* f12 = &uiNoto12FontFamily;
+  switch (SETTINGS.systemFont) {
+    case CrossPointSettings::SYS_FONT_UBUNTU:      f10 = &uiUbuntu10FontFamily;   f12 = &uiUbuntu12FontFamily;   break;
+    case CrossPointSettings::SYS_FONT_EB_GARAMOND: f10 = &uiGaramond10FontFamily; f12 = &uiGaramond12FontFamily; break;
+    case CrossPointSettings::SYS_FONT_SFU_GOUDY:   f10 = &uiGoudy10FontFamily;    f12 = &uiGoudy12FontFamily;    break;
+    default: break;
+  }
+  renderer.replaceFont(UI_10_FONT_ID, *f10);
+  renderer.replaceFont(UI_12_FONT_ID, *f12);
   fontCacheManager.clearCache();
 }
 

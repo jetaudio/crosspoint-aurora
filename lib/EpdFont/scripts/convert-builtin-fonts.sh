@@ -52,6 +52,30 @@ for size in ${UI_FONT_SIZES[@]}; do
   done
 done
 
+# EB Garamond UI font (extract static instances from variable font first with instancer).
+# Source: google/fonts main/ofl/ebgaramond/EBGaramond[wght].ttf -> instanced at wght=400/700.
+for size in 10 12; do
+  python fontconvert.py "ebgaramond_${size}_regular" $size \
+    "../builtinFonts/source/EBGaramond/EBGaramond-Regular.ttf" "$hebrew_path" \
+    --additional-intervals 0x05D0,0x05EA > "../builtinFonts/ebgaramond_${size}_regular.h"
+  python fontconvert.py "ebgaramond_${size}_bold" $size \
+    "../builtinFonts/source/EBGaramond/EBGaramond-Bold.ttf" "${hebrew_path/Regular/Bold}" \
+    --additional-intervals 0x05D0,0x05EA > "../builtinFonts/ebgaramond_${size}_bold.h"
+  echo "Generated ebgaramond_${size}_{regular,bold}.h"
+done
+
+# SFU Goudy UI font (single Medium weight used for both regular and bold positions).
+# Source: SFUGoudyMedium.TTF (local, copy into builtinFonts/source/SFUGoudy/).
+for size in 10 12; do
+  python fontconvert.py "sfugoudy_${size}_regular" $size \
+    "../builtinFonts/source/SFUGoudy/SFUGoudyMedium.ttf" "$hebrew_path" \
+    --additional-intervals 0x05D0,0x05EA > "../builtinFonts/sfugoudy_${size}_regular.h"
+  python fontconvert.py "sfugoudy_${size}_bold" $size \
+    "../builtinFonts/source/SFUGoudy/SFUGoudyMedium.ttf" "$hebrew_path" \
+    --additional-intervals 0x05D0,0x05EA > "../builtinFonts/sfugoudy_${size}_bold.h"
+  echo "Generated sfugoudy_${size}_{regular,bold}.h"
+done
+
 python fontconvert.py notosans_8_regular 8 \
   ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf \
   ../builtinFonts/source/NotoSansHebrew/NotoSansHebrew-Regular.ttf \
