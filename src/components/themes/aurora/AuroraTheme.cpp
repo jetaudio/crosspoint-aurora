@@ -49,6 +49,7 @@ constexpr int kBodyFontId = UI_10_FONT_ID;
 constexpr int kSettingNameFontId = UI_10_FONT_ID;
 constexpr int kBarLabelFontId = SMALL_FONT_ID;
 constexpr int kCaptionFontId = SMALL_FONT_ID;
+constexpr int kSectionFontId = UI_12_FONT_ID;
 
 // Resolve a UIIcon to its 32px bitmap (mirrors LyraTheme's iconForName for the
 // icons the bottom bar uses; keeps Aurora self-contained).
@@ -120,46 +121,14 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
   // upper-cased: an ASCII-only upper would mangle Vietnamese (ĐọC TIếP), and proper Unicode
   // casing isn't worth a mapping table; the small bold weight reads as an overline on its own.
   auto drawSectionLabel = [&](int x, int y, const char* text, bool active) {
-    renderer.drawText(kCaptionFontId, x, y, text, true, active ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    renderer.drawText(kSectionFontId, x, y, text, true, active ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
   };
 
-  // --- Merged header: "CONTINUE READING" label + horizontal rule + book progress% +
-  // battery — all on one line, like a classic book chapter-opening rule.
-  // Layout: [label]──────────────────[N%] [battery]
   const bool hasFeatured = !recentBooks.empty();
   const bool featuredSelected = listSelected == 0;
-  const int textY = content.y + kStatusY;
-  const int capLineH = renderer.getLineHeight(kCaptionFontId);
 
-  // Label on the left (bold when featured card is focused).
-  const auto contStyle = featuredSelected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
-  const char* contLabel = tr(STR_HOME_CONTINUE);
-  drawSectionLabel(P, textY, contLabel, featuredSelected);
-  const int labelW = renderer.getTextWidth(kCaptionFontId, contLabel, contStyle);
-
-  // Battery widget at the far right (draws icon + "NN%" if setting allows).
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  drawBatteryRight(renderer,
-                   Rect{content.x + W - P - metrics.batteryWidth, textY, metrics.batteryWidth, metrics.batteryHeight},
-                   showBatteryPercentage);
-
-  // Reading progress % (left of battery, only when book has known progress).
-  const int batteryAreaW = metrics.batteryWidth + (showBatteryPercentage ? 52 : 4);
-  int ruleRight = content.x + W - P - batteryAreaW;
-  if (hasFeatured && recentBooks[0].progressPercent != RecentBook::kProgressUnknown) {
-    const std::string pct = std::to_string(recentBooks[0].progressPercent) + "%";
-    const int pctW = renderer.getTextWidth(kCaptionFontId, pct.c_str(), EpdFontFamily::BOLD);
-    renderer.drawText(kCaptionFontId, ruleRight - pctW, textY, pct.c_str(), true, EpdFontFamily::BOLD);
-    ruleRight -= pctW + 8;
-  }
-
-  // Horizontal rule connecting label to right area (at text mid-height).
-  const int ruleX0 = P + labelW + 8;
-  const int ruleY = textY + capLineH / 2;
-  if (ruleRight > ruleX0 + 4) renderer.drawLine(ruleX0, ruleY, ruleRight - 4, ruleY);
-
-  const int thumbY = textY + capLineH + 8;
+  const int dividerY = drawHeaderBar(renderer, content.x, content.y, W, tr(STR_HOME_CONTINUE));
+  const int thumbY = dividerY + 12;
 
   // Draw a cached cover thumbnail into the given rect. The thumbnail is generated once by
   // HomeActivity at thumbHeight (the featured cover at homeCoverHeight, the small card covers
@@ -282,7 +251,7 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
 
   const int libHeaderY = thumbY + kThumbHeight + kSectionGap;
   drawSectionLabel(P, libHeaderY, tr(STR_LIBRARY), librarySelected >= 0);
-  const int underlineY = libHeaderY + renderer.getLineHeight(kCaptionFontId) + 4;
+  const int underlineY = libHeaderY + renderer.getLineHeight(kSectionFontId) + 4;
   renderer.drawLine(P, underlineY, W - P - rightInset, underlineY);
 
   const int barTop = content.height - kBottomBarHeight;
