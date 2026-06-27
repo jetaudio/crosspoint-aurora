@@ -238,21 +238,6 @@ void AuroraTheme::drawHomeScreen(GfxRenderer& renderer, Rect content, const std:
     renderer.drawCenteredText(kCaptionFontId, ey, tr(STR_HOME_EMPTY_HINT));
   }
 
-  // Ornate frame overlay for the Continue Reading card.
-  // Stored at /.aurora/frame_continue.bmp on the SD card (1-bit BMP, white=transparent).
-  // Drawn on top of cover + text so the black ornament pixels overlay the content while
-  // the white center pixels are skipped, leaving the card content visible underneath.
-  {
-    HalFile frameFile;
-    if (Storage.openFileForRead("AURORA", "/.aurora/frame_continue.bmp", frameFile)) {
-      Bitmap frameBmp(frameFile);
-      if (frameBmp.parseHeaders() == BmpReaderError::Ok && frameBmp.is1Bit()) {
-        renderer.drawBitmap1Bit(frameBmp, P - 6, thumbY - 6, W - 2 * (P - 6), kThumbHeight + 12);
-      }
-      frameFile.close();
-    }
-  }
-
   // --- "Library" section header + card list (library = recentBooks[1..]) ---
   // The status bar carries no page title, so this overline names the screen's library zone.
   // A full-width hairline divider beneath separates it from the Continue Reading card above.
