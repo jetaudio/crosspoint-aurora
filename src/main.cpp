@@ -1882,22 +1882,35 @@ void loop() {
         // the trip, so a fault here (the panel PMIC left live, a release poll
         // that never returns, a reset instead of a sleep) has until now only
         // been visible as a hole in the battery log the morning after.
-        // CMD:DSLEEP:<seconds>[:held] -- append :held to make the release poll
-        // believe the power line never came back up, which is the branch that
-        // decides between parking on a retry timer and waking straight back up
-        // into a full boot.
+        // CMD:DSLEEP:<seconds>[:held|:leak]
+        //
+        // :held makes the release poll believe the power line never came back
+        // up, which is the branch that decides between parking on a retry timer
+        // and waking straight back up into a full boot.
+        //
+        // :leak arms a 150 ms timer wake first, exactly as the idle light sleep
+        // does, and then sleeps. It reproduces on a bench what previously needed
+        // a book, an unplugged device and a page turn: if wake sources leak into
+        // deep sleep the device comes back in 150 ms, and if they are cleared it
+        // comes back on the <seconds> timer instead. The two are impossible to
+        // confuse in the log -- dsleep_ms moves by ~0 or by ~<seconds>.
         String rest = cmd.substring(7);
         bool simulateHeld = false;
-        const int heldSep = rest.indexOf(':');
-        if (heldSep >= 0) {
-          simulateHeld = rest.substring(heldSep + 1) == "held";
-          rest = rest.substring(0, heldSep);
+        bool leakTimer = false;
+        const int optSep = rest.indexOf(':');
+        if (optSep >= 0) {
+          const String opt = rest.substring(optSep + 1);
+          simulateHeld = opt == "held";
+          leakTimer = opt == "leak";
+          rest = rest.substring(0, optSep);
         }
         const uint32_t secs = static_cast<uint32_t>(rest.toInt());
-        logSerial.printf("DSLEEP_OK:%lu held=%d\n", static_cast<unsigned long>(secs), simulateHeld ? 1 : 0);
+        logSerial.printf("DSLEEP_OK:%lu held=%d leak=%d\n", static_cast<unsigned long>(secs), simulateHeld ? 1 : 0,
+                         leakTimer ? 1 : 0);
         logSerial.flush();
+        if (leakTimer) esp_sleep_enable_timer_wakeup(LIGHT_SLEEP_TIMER_US);
         freeink::PowerManager::armDebugTimerWake(secs > 0 ? secs : 20, simulateHeld);
-        enterDeepSleep(false, simulateHeld ? "debug-held" : "debug-timer");
+        enterDeepSleep(false, simulateHeld ? "debug-held" : (leakTimer ? "debug-leak" : "debug-timer"));
 #endif
       } else if (cmd == "IDLE") {
 #ifdef ENABLE_SERIAL_LOG
