@@ -56,4 +56,41 @@ void noteLightSleep(uint32_t ms);
 // standing floor. Refresh count alone can't: menus and popups refresh too.
 void notePageTurn();
 
+// Mark the start of a sleep gap. Records the wall clock, which — unlike
+// millis() — keeps running across deep sleep, so the next boot can tell how long
+// the device was actually away and charge that time to sleep rather than
+// silently dropping it. Call from the sleep path, after the last row is written.
+void noteSleepEntry();
+
+// --- since-last-charge accounting -------------------------------------------
+// The same facts the CSV carries, but anchored to the moment the cable came out
+// rather than to a cold boot, and readable on-device. The gauge gives the only
+// hard number here (charge actually spent); everything else is the state the
+// device was in while spending it, which is what turns one number into an
+// answer about where it went.
+//
+// Counters live in RTC_NOINIT and are re-anchored whenever external power is
+// present, so "since last charge" survives every sleep in between.
+struct Usage {
+  bool valid = false;      // an anchor has been taken
+  bool onCharger = false;  // external power right now, so the totals are frozen
+  uint16_t startRemCapMah = 0;
+  uint16_t remCapMah = 0;
+  uint16_t fccMah = 0;
+  uint16_t socPct = 0;
+  uint32_t elapsedS = 0;  // wall time since the anchor, sleep included
+  uint32_t runMs = 0;     // wall time with the CPU booted (light sleep included)
+  uint32_t lightSleepMs = 0;
+  uint32_t deepSleepMs = 0;
+  uint32_t hiClockMs = 0;
+  uint32_t wifiMs = 0;
+  uint32_t frontlightPctMs = 0;  // integral of brightness% x ms
+  uint32_t refreshes = 0;
+  uint32_t pageTurns = 0;
+  uint32_t sleepStallMs = 0;  // time lost polling a power line that would not release
+  uint32_t sleepStalls = 0;   // how many sleeps hit the release-poll ceiling
+  bool lastParkOk = true;     // did the last sleep park the panel PMIC
+};
+Usage usage();
+
 }  // namespace BatteryLog

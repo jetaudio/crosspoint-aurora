@@ -19,6 +19,7 @@
 #include <HalTiltSensor.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <PowerManager.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include <XteinkDetect.h>
@@ -230,6 +231,18 @@ enum class BootResume : uint8_t {
 // startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
 static bool deepSleepInProgress = false;
 
+// The inactivity clock. Lives here rather than inside loop() because two things
+// besides the loop need it: the auto-sleep timeout and the idle light sleep both
+// hang off it, and CMD:IDLE reports it. Anything that resets this suppresses
+// BOTH sleeps, which is a lot of consequence for a line that used to be one
+// unnamed condition in a six-term ||.
+static unsigned long lastActivityTime = 0;
+// Which of those six terms fired on the pass that last reset the clock. Purely
+// diagnostic, and the reason this file now names them: a reader whose idle timer
+// is being held open by a phantom input looks, from the outside, exactly like a
+// reader whose light sleep setting is off.
+static const char* lastActivitySource = "boot";
+
 #if FREEINK_CAP_TOUCH
 static bool finishWifiSessionWithoutRestart() {
   if (!BoardConfig::hasTouch()) return false;
@@ -365,6 +378,9 @@ void enterDeepSleep(bool fromTimeout = false, const char* reason = "other") {
   char sleepEvent[24];
   snprintf(sleepEvent, sizeof(sleepEvent), "SLEEP:%s", reason);
   BatteryLog::flushNow(sleepEvent);
+  // Stamp the wall clock too: millis() restarts at zero on the wake reset, so
+  // this is the only record of how long the gap that starts here actually was.
+  BatteryLog::noteSleepEntry();
   LOG_INF("SLP", "Deep sleep (%s)", reason);
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
@@ -662,6 +678,14 @@ void setup() {
   // before gpio.begin() (button hook) and Storage.begin() (SPI), and before the
   // display driver's power hooks touch the PCA9535.
   BoardT5S3::begin();
+  // Every route into deep sleep runs this last, while I2C is still alive: the
+  // panel PMIC hangs off the expander, and the expander's output latches outlive
+  // the ESP's sleep AND its wake reset, so an unparked TPS65185 keeps drawing
+  // for the whole sleep with nothing on screen to show for it. The display
+  // driver's own power-down is guarded by a cached flag and cannot be relied on
+  // — and the two early returns further down reach sleep before the driver has
+  // even been initialised.
+  freeink::PowerManager::setSleepParkHook([] { BoardT5S3::parkEpdPowerForSleep(); });
 #endif
 
   // checkPanic() clears the watchdog capture marker after a successful SD
@@ -686,6 +710,15 @@ void setup() {
 
   const auto wakeupReason = gpio.getWakeupReason();
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !gpio.verifyPowerButtonWakeup()) {
+    powerManager.startDeepSleep(gpio);
+  }
+
+  // Not a wake anyone asked for: the previous sleep found the power line still
+  // asserted after the release poll timed out, so instead of spinning on it (the
+  // old behaviour, ~25 mA for as long as it lasted) it parked on a retry timer.
+  // Test the line again and go straight back down; there is no one in front of
+  // the screen to show a boot to.
+  if (freeink::PowerManager::wokeFromStuckRetry()) {
     powerManager.startDeepSleep(gpio);
   }
 
@@ -1535,35 +1568,60 @@ void armLightSleepWakeSources() {
   esp_sleep_enable_gpio_wakeup();
 }
 
-// True when the frame was spent asleep and the caller should skip its own delay.
-bool tryIdleLightSleep(unsigned long idleForMs) {
-  if (!SETTINGS.lightSleepIdle) return false;
-  if (idleForMs < LIGHT_SLEEP_IDLE_MS) return false;
+// Why light sleep is not being entered, or nullptr when nothing is in the way.
+//
+// This used to be a chain of bare `return false`s inside tryIdleLightSleep().
+// Every one of them is a correct reason to stay awake and none of them left a
+// trace, so when light sleep silently stopped happening for a week the log could
+// only show the absence -- lsleep_ms flat while page turns kept climbing -- and
+// not the cause. Naming each rejection costs a string constant.
+const char* lightSleepBlocker(unsigned long idleForMs) {
+  if (!SETTINGS.lightSleepIdle) return "setting-off";
+  if (idleForMs < LIGHT_SLEEP_IDLE_MS) return "not-idle-yet";
 
   // Between page turns and nowhere else. A page held on screen mid-book is the
   // only state that is genuinely idle for minutes at a time; the home screen,
   // the reader menu and every settings page expect input to be acted on
   // promptly, and the saving there would be worth far less than the risk.
-  if (!activityManager.isReaderOnTop()) return false;
+  if (!activityManager.isReaderOnTop()) return "not-reader";
 
   // Anything with work in flight must keep its clocks: light sleep halts BOTH
   // cores, not just this task.
-  if (activityManager.skipLoopDelay()) return false;   // webserver / OTA
-  if (WiFi.getMode() != WIFI_MODE_NULL) return false;  // radio needs its clocks
-  if (deepSleepInProgress) return false;
-  if (activityManager.isRenderBusy()) return false;  // would freeze it mid-draw
+  if (activityManager.skipLoopDelay()) return "busy-loop";  // webserver / OTA
+  if (WiFi.getMode() != WIFI_MODE_NULL) return "wifi-up";   // radio needs its clocks
+  if (deepSleepInProgress) return "deep-sleeping";
+  if (activityManager.isRenderBusy()) return "render-busy";  // would freeze it mid-draw
 
   // A held button would re-trigger a level wake instantly, spinning instead of
   // sleeping -- and both hold actions (power off, touch toggle) time their hold
   // in the main loop, so the loop has to keep running while a key is down.
-  if (gpio.isPressed(HalGPIO::BTN_POWER) || gpio.rawIsPressed(HalGPIO::BTN_DOWN)) return false;
+  if (gpio.isPressed(HalGPIO::BTN_POWER)) return "power-held";
+  if (gpio.rawIsPressed(HalGPIO::BTN_DOWN)) return "userkey-held";
 
 #ifdef ENABLE_SERIAL_LOG
   // Light sleep kills the USB-Serial/JTAG console for good (verified: the device
   // keeps running, the console does not come back until the cable is replugged).
   // On the cable there is nothing to save anyway, so keep the console usable.
-  if (!lightSleepForced && gpio.isCharging()) return false;
+  if (!lightSleepForced && gpio.isCharging()) return "on-cable";
 #endif
+  return nullptr;
+}
+
+// Most recent answer from the above, plus how often the sleep itself was refused
+// by the SDK. Reported by CMD:IDLE.
+const char* lastLightSleepBlocker = "never-tried";
+uint32_t lightSleepEntries = 0;
+uint32_t lightSleepRejects = 0;
+
+// True when the frame was spent asleep and the caller should skip its own delay.
+bool tryIdleLightSleep(unsigned long idleForMs) {
+  const char* blocker = lightSleepBlocker(idleForMs);
+  if (blocker != nullptr) {
+    // "not-idle-yet" is the normal state of a device someone is reading on, so
+    // recording it would overwrite the answer the caller actually wants.
+    if (strcmp(blocker, "not-idle-yet") != 0) lastLightSleepBlocker = blocker;
+    return false;
+  }
 
   // Last, because it can block: a deferred panel refresh may still be running
   // after the render task has let go of its lock, and the panel must be idle
@@ -1580,6 +1638,13 @@ bool tryIdleLightSleep(unsigned long idleForMs) {
   // rather than busy-looping through a sleep that never happens.
   const unsigned long before = millis();
   const bool slept = esp_light_sleep_start() == ESP_OK;
+  if (slept) {
+    ++lightSleepEntries;
+    lastLightSleepBlocker = "none";
+  } else {
+    ++lightSleepRejects;
+    lastLightSleepBlocker = "sdk-refused";
+  }
   // millis() runs off the RTC timer, which keeps counting while the CPU is
   // halted, so this delta is the time the telemetry would otherwise miss
   // entirely (BatteryLog::accumulate only runs between sleeps).
@@ -1809,6 +1874,55 @@ void loop() {
         runLightSleepProbe(static_cast<uint32_t>(cmd.substring(7).toInt()), true);
       } else if (cmd.startsWith("BASE:")) {
         runLightSleepProbe(static_cast<uint32_t>(cmd.substring(5).toInt()), false);
+      } else if (cmd.startsWith("DSLEEP:")) {
+#ifdef ENABLE_SERIAL_LOG
+        // CMD:DSLEEP:<seconds> -- take the real deep-sleep path and come back
+        // on a timer. The one thing a bench cannot otherwise do: a physical
+        // button is the only way in and out, and the console does not survive
+        // the trip, so a fault here (the panel PMIC left live, a release poll
+        // that never returns, a reset instead of a sleep) has until now only
+        // been visible as a hole in the battery log the morning after.
+        // CMD:DSLEEP:<seconds>[:held] -- append :held to make the release poll
+        // believe the power line never came back up, which is the branch that
+        // decides between parking on a retry timer and waking straight back up
+        // into a full boot.
+        String rest = cmd.substring(7);
+        bool simulateHeld = false;
+        const int heldSep = rest.indexOf(':');
+        if (heldSep >= 0) {
+          simulateHeld = rest.substring(heldSep + 1) == "held";
+          rest = rest.substring(0, heldSep);
+        }
+        const uint32_t secs = static_cast<uint32_t>(rest.toInt());
+        logSerial.printf("DSLEEP_OK:%lu held=%d\n", static_cast<unsigned long>(secs), simulateHeld ? 1 : 0);
+        logSerial.flush();
+        freeink::PowerManager::armDebugTimerWake(secs > 0 ? secs : 20, simulateHeld);
+        enterDeepSleep(false, simulateHeld ? "debug-held" : "debug-timer");
+#endif
+      } else if (cmd == "IDLE") {
+#ifdef ENABLE_SERIAL_LOG
+        // CMD:IDLE -- why the device is not saving power right now. Answers the
+        // two questions the battery log cannot: what keeps resetting the
+        // inactivity clock, and which guard is turning light sleep down.
+        const unsigned long idleMs = millis() - lastActivityTime;
+        logSerial.printf("IDLE:ms=%lu src=%s ls=%s entries=%lu rejects=%lu now=%s\n", idleMs, lastActivitySource,
+                         lastLightSleepBlocker, static_cast<unsigned long>(lightSleepEntries),
+                         static_cast<unsigned long>(lightSleepRejects),
+                         lightSleepBlocker(idleMs) ? lightSleepBlocker(idleMs) : "clear");
+        // src=key says a bound key is down, not which one. On a board where one
+        // of them is an expander bit and four are bare solder pads, that is the
+        // whole question.
+        const auto& in = BoardConfig::ACTIVE.input;
+        const int8_t keyPins[] = {in.back, in.confirm, in.left, in.right, in.up, in.down, in.power};
+        for (const ConfigurableKey& key : CONFIGURABLE_KEYS) {
+          const int8_t pin = key.button < 7 ? keyPins[key.button] : -1;
+          // Both answers, because they can disagree: the pin is what the pad
+          // reads right now, down= is what the debounced input layer believes.
+          logSerial.printf("IDLE_KEY:btn=%u pin=%d level=%d down=%d\n", key.button, pin,
+                           pin >= 0 ? digitalRead(pin) : -1, gpio.rawIsPressed(key.button) ? 1 : 0);
+        }
+        logSerial.flush();
+#endif
       } else if (cmd.startsWith("LSFORCE:")) {
 #ifdef ENABLE_SERIAL_LOG
         lightSleepForced = cmd.substring(8).toInt() != 0;
@@ -1914,13 +2028,28 @@ void loop() {
   }
 
   // Check for any user activity (button press or release) or active background work
-  static unsigned long lastActivityTime = millis();
+  if (lastActivityTime == 0) lastActivityTime = millis();
   // Read and clear unconditionally: leaving it set behind a short-circuited ||
   // would hand the next pass an activity it did not have.
   const bool keyActivity = configurableKeyActivity;
   configurableKeyActivity = false;
-  if (keyActivity || gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() ||
-      halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
+  // Evaluated separately rather than as one || so the winner can be named. A
+  // single term stuck true here silently disables both the auto-sleep timeout
+  // and the idle light sleep, and the device just quietly stops saving power.
+  const char* activitySource = nullptr;
+  if (keyActivity) {
+    activitySource = "key";
+  } else if (gpio.wasAnyPressed() || gpio.wasAnyReleased()) {
+    activitySource = "button";
+  } else if (gpio.wasTouchActivity()) {
+    activitySource = "touch";
+  } else if (halTiltSensor.hadActivity()) {
+    activitySource = "tilt";
+  } else if (activityManager.preventAutoSleep()) {
+    activitySource = "activity-holds";
+  }
+  if (activitySource != nullptr) {
+    lastActivitySource = activitySource;
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }

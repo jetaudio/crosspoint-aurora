@@ -26,6 +26,7 @@ enum class SettingAction {
   Language,
   DownloadFonts,
   TextSettings,
+  BatteryMonitor,
   OpenAdvanced,  // Aurora flat layout: open the Advanced Settings sub-page
 };
 

@@ -15,11 +15,26 @@
 
 **New hardware target**
 
-- **LilyGo T5 S3 Pro / Pro Lite** (`pio run -e lilygo`) — ESP32-S3 driving the 4.7" 960×540 16-gray panel over the S3's i80 LCD
-  peripheral (no on-glass controller), with GT911 touch, PCF8563 RTC, BQ27220 fuel gauge + BQ25896 charger, the frontlight on
-  GPIO11, and the PCA9535 expander key on the case (IO48). Brought up and verified on real hardware.
+- **LilyGo T5 S3 Pro / Pro Lite** (`pio run -e lilygo`, or `-e lilygo_pro` for the LoRa/GPS-fitted Pro) — ESP32-S3 driving the
+  4.7" 960×540 16-gray panel over the S3's i80 LCD peripheral (no on-glass controller), through a TPS65185 PMIC and a PCA9535
+  expander, with GT911 touch, PCF8563 RTC, BQ27220 fuel gauge + BQ25896 charger, the frontlight on GPIO11, and the expander key
+  on the case (IO48). Brought up and verified on real hardware.
+- **Panel waveform from the vendor tables**, temperature-ranged, with anti-aliasing greys carried in the fast bank so text edges
+  are smoothed without the mid-grey flash a clean refresh costs.
+- **Three solderable key pads** on the Pro Lite, where the LoRa module would sit (GPIO10 / GPIO1 / GPIO47). The fourth pad,
+  GPIO46, is *not* free — the i80 bus holds it as its DC pin — and the firmware says so rather than offering a key that would
+  fight the LCD peripheral for the pad.
+- **Two separate release builds**, one per variant, each carrying its own board tag so a device is only ever offered the
+  firmware that matches it.
+- **Web flasher** — [jetaudio.github.io/crosspoint-aurora](https://jetaudio.github.io/crosspoint-aurora/) installs either
+  variant straight from the browser (ESP Web Tools), with a separate button for each board.
 - **Serial debug harness** — `scripts/serial_screen_capture.py` pulls the framebuffer as a PNG and injects key presses, taps,
-  long-presses and swipes over USB serial, so the UI can be exercised and diffed without touching the device.
+  long-presses and swipes over USB serial, so the UI can be exercised and diffed without touching the device. Alongside it:
+  `CMD:IDLE` (what is holding the inactivity clock open and which guard is refusing light sleep, per key, with the raw pad level
+  beside the debounced verdict), `CMD:DSLEEP:<sec>[:held]` (drive the real deep-sleep path and come back on a timer — the one
+  thing a bench otherwise cannot do, since a physical button is the only way in and out and the console dies on the way down),
+  `CMD:BATTLOG`, `CMD:GPIO`, `CMD:GET`/`CMD:SET` for any setting, and `CMD:BATTSIM` to exercise the low-battery paths on a full
+  pack.
 
 **Touch-first UI**
 
@@ -36,7 +51,13 @@
 
 - **Every key gets its own tap and hold action**, chosen from one shared list: nothing, next/previous page, back, home, reader
   menu, control center, night mode, refresh, frontlight, touch on/off, sleep. Covers the capacitive **Home** key, the **IO48**
-  expander key (which previously did nothing useful) and **BOOT**.
+  expander key (which previously did nothing useful), **BOOT**, and any key soldered to the spare pads.
+- **Key actions live on their own screen** (Settings → Controls → Key actions). A dozen picker rows used to crowd out the
+  handful of settings people actually change; the sub-screen names the way *back* in its header rather than naming itself,
+  because the screen you are on is the one you can see.
+- Keys go through the HAL like any other board key, so pull-ups, debounce, press/release edges, wake-from-light-sleep and
+  counting as user activity all come for free. A pin polled by hand outside the HAL gets none of that — GPIO10 spent a version
+  doing exactly that, and paid with ~600 ms of tap latency and a device that slept while its owner was reading.
 - Two-zone navigation for button-only devices, plus a three-way **button hints** setting (off / front only / front + edge).
 
 **Vietnamese**
@@ -53,10 +74,42 @@
   reopen, hold-to-jump in the panel lists, and overlays that open on a HALF refresh so no gray ghost is left behind.
 - **Aurora home screen** — slim status bar, a "Continue Reading" hero card with cover and progress, card-style recent books, and a
   persistent bottom icon tab bar. Night mode inverts the whole UI, not just the page.
+- **Screen orientation, not reading orientation** — rotating used to turn the reader and nothing else, so a device held sideways
+  had a sideways book and an upright library. Orientation is now the screen's: applied at boot before the first frame, so it
+  survives a reset, a battery pull and a deep sleep alike, and leaving a book no longer un-rotates the device. A four-way picker
+  (Portrait / Landscape / Portrait 180° / Landscape reversed) replaces stepping a quarter turn per tap, and touch follows the
+  pixels everywhere.
+- **Clock** — PCF8563 RTC on the T5 S3, shown in the status bar (12/24 h, either side), with a UTC offset picker and NTP sync.
+
+**Power and battery**
+
+- **Battery Monitor** (Settings → System) — where the charge went since the cable came out. The gauge sits in series with the
+  pack, so the only measurable number is the *total*; the split across deep sleep, awake, light sleep, frontlight, CPU clock,
+  Wi-Fi and screen refreshes is an estimate from bench coefficients, and the leftover is shown as its own signed row rather than
+  spread around to make the columns add up. A breakdown whose residual is hidden is one that cannot be caught being wrong.
+- **Light sleep between page turns** — a page held on screen mid-book is the only state that is genuinely idle for minutes, so
+  that is the only place the CPU is halted. Every key, the touch INT and the expander INT stay armed as wake sources.
+- **Battery telemetry log** — `/.crosspoint/battery.csv`, one row every five minutes plus one at every boot and sleep, carrying
+  the gauge reading alongside the state the device was in. `scripts/fetch_battery_log.py` pulls it over serial and
+  `scripts/analyze_battery_log.py` fits per-component costs offline — and reports the conditioning and the noise floor rather
+  than a confident-looking number, because two loads that are always on together cannot be separated by any amount of data.
+- **Sleep that actually sleeps.** Three faults lived on the deep-sleep path, all invisible to the log because it runs after the
+  card is unmounted and the console is down: an unbounded power-button release poll that parked the device in a ~25 mA idle loop
+  looking exactly like a real sleep (two nights cost 240 mAh and 110 mAh); a panel PMIC that was never unconditionally powered
+  down, so one silent I2C failure left it drawing all night while the *awake* current still read normal; and a key mapped to a
+  pad the LCD peripheral owns, which read permanently pressed and — since a bound key counts as user activity — reset the
+  inactivity clock every loop pass, killing idle light sleep and the auto-sleep timeout together.
+- **Sleep findings survive the sleep.** The log gained `dsleep_ms`, `stall_ms`, `stalls`, `park`, `rst` and `wake`: how long the
+  device was really away (from the wall clock, the only one that survives deep sleep), how much of that was spent awake inside
+  the sleep path, whether the panel PMIC was verified off, and the raw reset/wake causes — which separate a clean button wake
+  from a crash on the way down and from a brownout. "It showed the sleep screen and then restarted" used to be any of the three.
+- **Low-battery protection and a charging indicator**, the latter read from the charger IC on boards with no USB-detect pin.
 
 **Library and system**
 
 - **File browser context menu** (long-press): rename and delete.
+- **SD-card fonts and per-family drop-cap faces** — reader families and their decorative initials are loaded from the card, so a
+  drop cap matches the face it opens.
 - **~300 KB of flash reclaimed** by compiling hyphenation only for the languages actually shipped (en/fr/es/it).
 - **Fast wake** — boot no longer blocks waiting for the power button to be released, so the UI draws immediately.
 - **OTA from this fork** — update checks read this repository's releases (asset `firmware-lilygo.bin` for the T5 S3, `firmware.bin`

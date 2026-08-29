@@ -41,17 +41,22 @@ inline constexpr ConfigurableKey KEY_EXPANDER = {HalGPIO::BTN_DOWN, &CrossPointS
                                                  &CrossPointSettings::userBtnLongAction, StrId::STR_USER_BTN_TAP,
                                                  StrId::STR_USER_BTN_HOLD};
 
-// The four pads a T5 S3 Pro Lite has spare where the LoRa module would sit,
-// named by the pin a key gets soldered to. See BoardT5S3Pins.h for why these
-// four and not the GPS pair. Declared on every build (they are only data; the
-// settings fields and strings exist everywhere) so that the row filter can
-// recognise their names on a board that does not have them.
+// The pads a T5 S3 Pro Lite has spare where the LoRa module would sit, named by
+// the pin a key gets soldered to. See BoardT5S3Pins.h for why these and not the
+// GPS pair, and why GPIO46 below is listed but never offered. Declared on every
+// build (they are only data; the settings fields and strings exist everywhere)
+// so that the row filter can recognise their names on a board without them.
 inline constexpr ConfigurableKey KEY_G10 = {HalGPIO::BTN_UP, &CrossPointSettings::keyG10ShortAction,
                                             &CrossPointSettings::keyG10LongAction, StrId::STR_KEY_G10_TAP,
                                             StrId::STR_KEY_G10_HOLD};
 inline constexpr ConfigurableKey KEY_G1 = {HalGPIO::BTN_LEFT, &CrossPointSettings::keyG1ShortAction,
                                            &CrossPointSettings::keyG1LongAction, StrId::STR_KEY_G1_TAP,
                                            StrId::STR_KEY_G1_HOLD};
+// Kept as data even though no build lists it below: the settings rows for it
+// still exist (fields, strings, the web API), and the row filter recognises a
+// key by name to hide the rows of a key this board does not have. GPIO46 is not
+// free on the T5 S3 -- the EPD i80 bus holds it as its DC pin -- so it is no
+// longer offered as a key anywhere; see BoardT5S3Pins.h.
 inline constexpr ConfigurableKey KEY_G46 = {HalGPIO::BTN_RIGHT, &CrossPointSettings::keyG46ShortAction,
                                             &CrossPointSettings::keyG46LongAction, StrId::STR_KEY_G46_TAP,
                                             StrId::STR_KEY_G46_HOLD};
@@ -61,7 +66,7 @@ inline constexpr ConfigurableKey KEY_G47 = {HalGPIO::BTN_BACK, &CrossPointSettin
 
 // What this build actually has, in the order Key actions lists them.
 #if FREEINK_DEVICE_LILYGO && !T5S3_HAS_LORA_GPS
-inline constexpr std::array<ConfigurableKey, 5> CONFIGURABLE_KEYS = {KEY_EXPANDER, KEY_G10, KEY_G1, KEY_G46, KEY_G47};
+inline constexpr std::array<ConfigurableKey, 4> CONFIGURABLE_KEYS = {KEY_EXPANDER, KEY_G10, KEY_G1, KEY_G47};
 #elif FREEINK_DEVICE_LILYGO
 // Pro: the radio owns those four pins, and the expander key is all that is left.
 inline constexpr std::array<ConfigurableKey, 1> CONFIGURABLE_KEYS = {KEY_EXPANDER};
