@@ -14,6 +14,7 @@
 
 #include "ConfigurableKeys.h"
 #include "CrossPointSettings.h"
+#include "HomeButtonSettings.h"
 #include "KOReaderCredentialStore.h"
 #include "ReaderFontSizes.h"
 #include "SystemFont.h"
@@ -188,7 +189,8 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 inline std::vector<StrId> buttonActionValues() {
   return {StrId::STR_ACTION_NONE,   StrId::STR_PAGE_NEXT,   StrId::STR_PAGE_PREV,      StrId::STR_ACTION_BACK,
           StrId::STR_ACTION_HOME,   StrId::STR_READER_MENU, StrId::STR_CONTROL_CENTER, StrId::STR_NIGHT_MODE,
-          StrId::STR_FORCE_REFRESH, StrId::STR_FRONTLIGHT,  StrId::STR_TOUCH_TOGGLE,   StrId::STR_SLEEP};
+          StrId::STR_FORCE_REFRESH, StrId::STR_FRONTLIGHT,  StrId::STR_TOUCH_TOGGLE,   StrId::STR_SLEEP,
+          StrId::STR_ACTION_POWER_OFF};
 }
 
 inline std::vector<StrId> buildLongPressMenuValues() {
@@ -429,11 +431,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
 
         // Key actions: one tap row and one hold row per key, each drawing on
         // the shared BUTTON_ACTION list (order must match that enum). Rows for
-        // keys a board does not have are filtered out below.
-        SettingInfo::Enum(StrId::STR_HOME_KEY_TAP, &CrossPointSettings::homeKeyShortAction, buttonActionValues(),
-                          "homeKeyShortAction", StrId::STR_CAT_CONTROLS),
-        SettingInfo::Enum(StrId::STR_HOME_KEY_HOLD, &CrossPointSettings::homeKeyLongAction, buttonActionValues(),
-                          "homeKeyLongAction", StrId::STR_CAT_CONTROLS),
+        // keys a board does not have are filtered out below. The capacitive
+        // Home key is appended further down (home_button::*, HomeButtonAction).
         SettingInfo::Enum(StrId::STR_USER_BTN_TAP, &CrossPointSettings::userBtnShortAction, buttonActionValues(),
                           "userBtnShortAction", StrId::STR_CAT_CONTROLS),
         SettingInfo::Enum(StrId::STR_USER_BTN_HOLD, &CrossPointSettings::userBtnLongAction, buttonActionValues(),
@@ -480,6 +479,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
+        SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,
+                            "libraryUseMetadata", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,
@@ -598,6 +599,16 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Toggle(StrId::STR_SLEEP, &CrossPointSettings::ccTileSleep, "ccTileSleep",
                             StrId::STR_CUSTOMISE_CONTROL_CENTER),
     };
+    // Double-click power frontlight shortcut only exists on the X4 Pro
+    if (BoardConfig::isX4Pro()) {
+      for (auto it = v.begin(); it != v.end(); ++it) {
+        if (it->nameId == StrId::STR_SHORT_PWR_BTN) {
+          v.insert(it, SettingInfo::Toggle(StrId::STR_DBL_CLICK_PWR_LIGHT, &CrossPointSettings::doubleClickPwrLight,
+                                           "doubleClickPwrLight", StrId::STR_CAT_CONTROLS));
+          break;
+        }
+      }
+    }
     // Only show tilt page turn setting when the QMI8658 IMU is present (X3)
     if (halTiltSensor.isAvailable()) {
       // With the touch/gesture rows at the head of Controls, not stranded
@@ -616,8 +627,14 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
 
   std::vector<SettingInfo> v = baseList;
   if (!BoardConfig::hasTouch()) {
+    // The toolbar reader menu is touch-first chrome: button boards keep the
+    // classic list menu, so the style choice is hidden along with the touch
+    // controls.
     v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) { return s.nameId == StrId::STR_TOUCH_READER_CONTROLS; }),
+                           [](const SettingInfo& s) {
+                             return s.nameId == StrId::STR_TOUCH_READER_CONTROLS ||
+                                    s.nameId == StrId::STR_READER_MENU_STYLE;
+                           }),
             v.end());
   }
   // The reader-menu gesture choice only makes sense where the menu stays
@@ -627,8 +644,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   if (!BoardConfig::hasHomeKey()) {
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) {
-                             return s.nameId == StrId::STR_SHOW_READER_MENU || s.nameId == StrId::STR_HOME_KEY_TAP ||
-                                    s.nameId == StrId::STR_HOME_KEY_HOLD;
+                             return s.nameId == StrId::STR_SHOW_READER_MENU;
                            }),
             v.end());
   }
@@ -674,6 +690,13 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     v.erase(
         std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_LONG_PRESS_MENU; }),
         v.end());
+  }
+  if (BoardConfig::hasHomeKey()) {
+    v.reserve(v.size() + 3);
+    for (unsigned i = 0; i < 3; ++i) {
+      v.push_back(SettingInfo::StaticEnum(home_button::GESTURE_LABELS[i], home_button::FIELDS[i],
+                                          home_button::ACTION_LABELS, home_button::KEYS[i], StrId::STR_CAT_CONTROLS));
+    }
   }
   if (BoardConfig::hasTouch()) {
     v.erase(std::remove_if(v.begin(), v.end(),

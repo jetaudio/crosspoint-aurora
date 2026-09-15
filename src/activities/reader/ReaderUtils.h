@@ -49,7 +49,8 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
                          input.wasReleased(MappedInputManager::Button::Power);
   const bool powerTurnBack = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN_BACK &&
                              input.wasReleased(MappedInputManager::Button::Power);
-  const bool next = tiltNext || pageButtonTriggered(MappedInputManager::Button::PageForward) || powerTurn ||
+  const bool next = input.homeButtonAction() == HomeButtonAction::NextPage || tiltNext ||
+                    pageButtonTriggered(MappedInputManager::Button::PageForward) || powerTurn ||
                     pageButtonTriggered(nextButton);
   // Configurable-button actions (main.cpp's dispatcher) reach the reader as
   // frame-scoped page requests, so any button can be bound to a page turn
@@ -64,7 +65,7 @@ struct TouchPageTurn {
   unsigned long heldMs;
 };
 
-inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInputManager& input) {
+inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
   TouchPageTurn result{false, false, 0};
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
@@ -128,14 +129,11 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   return x >= zoneWidth && x < width - zoneWidth && y >= zoneHeight && y < height - zoneHeight;
 }
 
-// Reader menu opens on the menu edge-swipe or a center-third tap. On home-key
-// boards a long press of the capacitive key runs the user-selected long-press
-// function instead (SETTINGS.longPressMenuFunction), not the menu.
-// With touch reader controls Off the reading surface ignores touch entirely,
-// menu included, so a stray brush of the screen can't open it; the menu stays
-// reachable via the Confirm button.
+// Reader menu opens on the menu edge-swipe or a center-third tap. Home-key
+// actions are configured separately from screen gestures.
+// Menu gestures honor showReaderMenu independently of touchReaderControls,
+// which only gates page-turn touch zones in detectTouchPageTurn().
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
-  if (!SETTINGS.touchReaderControls) return false;
   if (!input.hasTouch()) return false;
   if (input.wasMenuGesture()) return true;
   // Bottom-edge up-swipe variant: only selectable on home-key boards, where
@@ -171,7 +169,7 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
 // re-drive the whole text body (a visible flash). Other panels display
 // normally. Same refresh-cadence bookkeeping as displayWithRefreshCycle.
 inline void displayBaseWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
-  if (!renderer.combinesGrayscaleBase()) {
+  if (renderer.grayscaleCapabilities().base != HalDisplay::GrayscaleBase::Combined) {
     displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
     return;
   }
@@ -194,7 +192,8 @@ void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
     LOG_ERR("READER", "Failed to store BW buffer for anti-aliasing");
     // A combined-base panel may still hold a deferred B/W activation; flush it
     // so the page reaches the panel even without its grays.
-    if (renderer.combinesGrayscaleBase()) renderer.cleanupGrayscaleWithFrameBuffer();
+    if (renderer.grayscaleCapabilities().base == HalDisplay::GrayscaleBase::Combined)
+      renderer.cleanupGrayscaleWithFrameBuffer();
     return;
   }
 

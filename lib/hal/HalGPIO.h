@@ -115,10 +115,15 @@ class HalGPIO {
 
   unsigned long getHeldTime() const;
   unsigned long getPowerButtonHeldTime() const;
+  // True when any button contact is closed right now, read straight from the
+  // hardware (ADC ladder off its idle rail, or the power GPIO asserted), without
+  // going through the debounced state. Cheap enough to call every few ms.
+  bool rawInputActive();
   bool hasTouch() const;
   // Capacitive Home key reported by the touch controller (X4 Pro). The tap
   // event fires on release and excludes a long hold.
   bool hasHomeKey() const;
+  bool wasHomeKeyPressed() const;
   bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
   bool wasTouchTap(float& nx, float& ny) const;
@@ -183,7 +188,19 @@ class HalGPIO {
   // getBatteryPercentage() for why the reported percentage needs it.
   bool isChargeComplete() const;
 
+  // Ship mode: ask the charger IC (BQ25896) to open its BATFET, disconnecting
+  // the pack from the system rail. On battery the board loses power inside a
+  // few hundred microseconds of the write returning; on USB it keeps running
+  // from VBUS, so callers must fall through to ordinary deep sleep. Exit is
+  // hardware-only: /QON (the power button) held low for ~1 s, or a cable.
+  // Returns false when the board has no charger that can do this.
+  bool enterChargerShipMode() const;
+
   static constexpr unsigned long CHARGE_POLL_MS = 1500;
+  // Whether a cold boot with no USB detected can be trusted to mean a held
+  // power button (Xteink-style button-energized rail with reliable USB
+  // detection). When false, cold boots always proceed to a normal boot.
+  bool coldBootImpliesPowerButton() const;
 
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;

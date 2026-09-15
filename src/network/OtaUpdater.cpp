@@ -21,10 +21,11 @@
 namespace {
 // This fork ships its own builds, so the update feed is the fork's releases, not
 // upstream's -- pointing at upstream would offer a firmware that overwrites aurora
-// with stock CrossPoint. The release must attach the binary as exactly "firmware.bin"
-// (ReleaseJsonParser matches on that name) and carry a plain semver tag such as
-// "1.5.1": isUpdateNewer() sscanf's three integers off the front of the tag, so a
-// leading "v" leaves it comparing garbage.
+// with stock CrossPoint. The release must attach one binary per board named
+// crosspoint-<tag>-<board>.bin (release.yml does this; the T5 S3 builds are
+// "lilygo" and "lilygo-pro") and carry a plain semver tag such as "1.5.1":
+// isUpdateNewer() sscanf's three integers off the front of the tag, so a leading
+// "v" leaves it comparing garbage.
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/jetaudio/crosspoint-aurora/releases/latest";
 }  // namespace
 
@@ -37,17 +38,29 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // OOM there aborts. fetchUrl handles the verified-https GET, redirects, and
   // User-Agent (see HttpDownloader).
   ReleaseJsonParser releaseParser;
-  // Each board updates from its own release asset: plain firmware.bin for the
-  // C3 X4/X3 binary (pre-existing releases), firmware-<board>.bin otherwise.
+  releaseParser.setFirmwareAssetName("");
+  // Each board updates from crosspoint-<version>-<device>.bin. The combined
+  // C3 image uses x3-x4; other asset suffixes match their firmware board tag.
   const bool isX4 = board_tag::boardNameLen() == 2 && memcmp(board_tag::boardName(), "x4", 2) == 0;
-  char assetName[48] = "firmware.bin";
+  char assetSuffix[20] = "-x3-x4";
   if (!isX4) {
-    snprintf(assetName, sizeof(assetName), "firmware-%.*s.bin", static_cast<int>(board_tag::boardNameLen()),
+    snprintf(assetSuffix, sizeof(assetSuffix), "-%.*s", static_cast<int>(board_tag::boardNameLen()),
              board_tag::boardName());
   }
-  releaseParser.setFirmwareAssetName(assetName);
-  const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
-    releaseParser.feed(reinterpret_cast<const char*>(data), len);
+  char assetName[48] = {};
+  bool assetNameSet = false;
+  const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&](const uint8_t* data, size_t len) {
+    size_t offset = 0;
+    while (!assetNameSet && offset < len) {
+      releaseParser.feed(reinterpret_cast<const char*>(data + offset), 1);
+      offset++;
+      if (releaseParser.foundTag()) {
+        snprintf(assetName, sizeof(assetName), "crosspoint-%s%s.bin", releaseParser.getTagName(), assetSuffix);
+        releaseParser.setFirmwareAssetName(assetName);
+        assetNameSet = true;
+      }
+    }
+    if (offset < len) releaseParser.feed(reinterpret_cast<const char*>(data + offset), len - offset);
     return true;
   });
   if (!ok) {

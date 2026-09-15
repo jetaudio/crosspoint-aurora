@@ -3,14 +3,17 @@
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Utf8.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 
 #include "BatteryMonitorActivity.h"
+#include "AboutActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ConfigurableKeys.h"
@@ -18,8 +21,10 @@
 #include "CrossPointSettings.h"
 #include "DropCapFontSelectionActivity.h"
 #include "FontDownloadActivity.h"
+#include "HomeButtonSettingsActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "KeyActionsSettingsActivity.h"
+#include "KeyboardLayoutsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
 #include "OpdsServerListActivity.h"
@@ -39,9 +44,6 @@
 #include "util/ScreenOrientation.h"
 
 namespace fui = freeink::ui;
-
-const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
 
 SettingsActivity::SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool advanced)
     : UiTabListActivity("Settings", renderer, mappedInput), advancedPage(advanced) {}
@@ -65,8 +67,9 @@ void SettingsActivity::rebuildSettingsLists() {
     if (setting.category == StrId::STR_NONE_OPT) continue;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       // The sunlight fading fix is a grayscale-waveform compensation that does
-      // not apply on the X4 Pro (plain OTP waveform, no custom grayscale LUT).
-      if (setting.valuePtr == &CrossPointSettings::fadingFix && BoardConfig::isX4Pro()) {
+      // not apply on the X4 Pro / X4 Classic (plain OTP waveform, same panels).
+      if (setting.valuePtr == &CrossPointSettings::fadingFix &&
+          (BoardConfig::isX4Pro() || BoardConfig::isX4Classic())) {
         continue;
       }
       displaySettings.push_back(setting);
@@ -76,6 +79,7 @@ void SettingsActivity::rebuildSettingsLists() {
       if (setting.inTextSettings) continue;
       readerSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_CONTROLS) {
+      if (BoardConfig::hasHomeKey() && setting.valuePtr == &CrossPointSettings::longPressMenuFunction) continue;
       if (setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&
           SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FOOTNOTES) {
         continue;
@@ -101,10 +105,13 @@ void SettingsActivity::rebuildSettingsLists() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BATTERY_MONITOR, SettingAction::BatteryMonitor));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_LIBRARY_REBUILD, SettingAction::RebuildLibraryIndex));
   // OTA fetches this board's own release asset (see OtaUpdater); boards whose
   // asset isn't published yet just report no update available.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.insert(readerSettings.begin(),
                         SettingInfo::Action(StrId::STR_TEXT_SETTINGS, SettingAction::TextSettings));
@@ -439,7 +446,7 @@ bool SettingsActivity::isTopLevelSetting(StrId nameId) {
     case StrId::STR_SLEEP_SCREEN:
     case StrId::STR_REFRESH_FREQ:
     case StrId::STR_SHOW_BUTTON_HINTS:
-    case StrId::STR_HOME_KEY_TAP:
+    case StrId::STR_HOME_BUTTON_TAP:
     case StrId::STR_WIFI_NETWORKS:
     case StrId::STR_TIME_TO_SLEEP:
     case StrId::STR_LANGUAGE:
@@ -481,7 +488,7 @@ void SettingsActivity::buildAuroraEntries() {
                                         StrId::STR_DROP_CAPS, StrId::STR_DROP_CAP_FONT, StrId::STR_FONT_SIZE,
                                         StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
     addSection(StrId::STR_CAT_DISPLAY, {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ,
-                                        StrId::STR_SHOW_BUTTON_HINTS, StrId::STR_HOME_KEY_TAP});
+                                        StrId::STR_SHOW_BUTTON_HINTS, StrId::STR_HOME_BUTTON_TAP});
     addSection(StrId::STR_CAT_DEVICE,
                {StrId::STR_WIFI_NETWORKS, StrId::STR_TIME_TO_SLEEP, StrId::STR_LANGUAGE, StrId::STR_CHECK_UPDATES});
     // Spacer header (no label) so the entry below sits in its own card.
@@ -534,7 +541,8 @@ void SettingsActivity::buildAuroraEntries() {
                   StrId::STR_PWR_BTN_FOOTNOTE_BACK},
                  placedControls);
     {
-      std::vector<StrId> keyRows{StrId::STR_HOME_KEY_TAP, StrId::STR_HOME_KEY_HOLD};
+      std::vector<StrId> keyRows{StrId::STR_HOME_BUTTON_TAP, StrId::STR_HOME_BUTTON_DOUBLE_TAP,
+                                 StrId::STR_HOME_BUTTON_LONG_PRESS};
       for (const ConfigurableKey& key : CONFIGURABLE_KEYS) {
         keyRows.push_back(key.tapName);
         keyRows.push_back(key.holdName);
@@ -654,6 +662,7 @@ bool SettingsActivity::handleButtons() {
 }
 
 void SettingsActivity::toggleCurrentSetting() {
+  mappedInput.resetHomeButtonInput();
   const SettingInfo* setting = settingAtRing(ringPos());
   if (setting == nullptr) return;  // the tab band, or a section header
   activateSetting(*setting);
@@ -677,10 +686,11 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
     SETTINGS.*(setting.valuePtr) = !currentValue;
   } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
     const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
-    if (setting.enumValues.size() > 2) {
+    const auto enumLabels = setting.enumLabels();
+    if (enumLabels.size() > 2) {
       const auto valuePtr = setting.valuePtr;
-      optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()),
-                       currentValue, [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
+      optionPopup.show(setting.nameId, enumLabels.data(), static_cast<int>(enumLabels.size()), currentValue,
+                       [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
                          SETTINGS.*valuePtr = idx;
                          syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
                          SETTINGS.saveToFile();
@@ -690,7 +700,7 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
       requestUpdate();
       return;
     }
-    SETTINGS.*(setting.valuePtr) = (currentValue + 1) % static_cast<uint8_t>(setting.enumValues.size());
+    SETTINGS.*(setting.valuePtr) = (currentValue + 1) % static_cast<uint8_t>(enumLabels.size());
   } else if (setting.type == SettingType::ENUM && setting.valueGetter && setting.valueSetter) {
     if (setting.nameId == StrId::STR_DROP_CAP_FONT) {
       // Launch the drop-cap font picker (preview + list) instead of cycling.
@@ -703,7 +713,7 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
       return;
     }
     const uint8_t totalValues = setting.enumStringValues.empty()
-                                    ? static_cast<uint8_t>(setting.enumValues.size())
+                                    ? static_cast<uint8_t>(setting.enumLabels().size())
                                     : static_cast<uint8_t>(setting.enumStringValues.size());
     const uint8_t cur = setting.valueGetter();
     if (totalValues > 2) {
@@ -717,7 +727,8 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
       if (!setting.enumStringValues.empty()) {
         optionPopup.show(setting.nameId, setting.enumStringValues, cur, std::move(onSelect));
       } else {
-        optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()), cur,
+        const auto enumLabels = setting.enumLabels();
+        optionPopup.show(setting.nameId, enumLabels.data(), static_cast<int>(enumLabels.size()), cur,
                          std::move(onSelect));
       }
       requestUpdate();
@@ -735,6 +746,16 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
 
     switch (setting.action) {
+      case SettingAction::HomeButton: {
+        // Activities must outlive this call and are owned by the activity stack.
+        auto activity = makeUniqueNoThrow<HomeButtonSettingsActivity>(renderer, mappedInput);
+        if (!activity) {
+          LOG_ERR("SET", "OOM: Home button settings");
+          return;
+        }
+        startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
+        return;
+      }
       case SettingAction::RemapFrontButtons:
         startActivityForResult(std::make_unique<ButtonRemapActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -761,6 +782,9 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
         break;
       case SettingAction::ClearCache:
         startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::RebuildLibraryIndex:
+        rebuildLibraryIndex();
         break;
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);
@@ -796,6 +820,20 @@ void SettingsActivity::activateSetting(const SettingInfo& setting) {
       case SettingAction::OpenAdvanced:
         startActivityForResult(std::make_unique<SettingsActivity>(renderer, mappedInput, /*advanced=*/true),
                                [this](const ActivityResult&) { rebuildSettingsLists(); });
+        break;
+      case SettingAction::KeyboardLayouts:
+        if (auto activity = makeUniqueNoThrow<KeyboardLayoutsActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: KeyboardLayoutsActivity");
+        }
+        break;
+      case SettingAction::About:
+        if (auto activity = makeUniqueNoThrow<AboutActivity>(renderer, mappedInput)) {
+          startActivityForResult(std::move(activity), nullptr);
+        } else {
+          LOG_ERR("SETTINGS", "OOM: AboutActivity");
+        }
         break;
       case SettingAction::None:
         // Do nothing
@@ -835,6 +873,29 @@ void SettingsActivity::syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChan
   }
 }
 
+void SettingsActivity::rebuildLibraryIndex() {
+  // Prevent SD-backed fonts from opening a second reader while EPUB metadata is scanned.
+  // Keep the popup static because an e-ink refresh per folder would dominate the rebuild.
+  RenderLock lock(*this);
+  GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
+
+  library::BuildStats stats;
+  const bool ok = library::buildLibraryIndex("/", stats, SETTINGS.libraryUseMetadata != 0);
+  if (ok) {
+    LOG_INF("LIB", "rebuild: %u books (%u new, %u renamed, %u removed, %u enriched) in %ums",
+            static_cast<unsigned>(stats.books), static_cast<unsigned>(stats.added),
+            static_cast<unsigned>(stats.renamed), static_cast<unsigned>(stats.removed),
+            static_cast<unsigned>(stats.enriched), static_cast<unsigned>(stats.walkMs));
+    if (stats.dedupDegraded) LOG_ERR("LIB", "rebuild completed without duplicate detection");
+  } else {
+    LOG_ERR("LIB", "index rebuild failed");
+  }
+
+  GUI.drawPopup(renderer, ok ? tr(STR_LIBRARY_REBUILD_DONE) : tr(STR_LIBRARY_REBUILD_FAILED));
+  delay(1200);
+  requestUpdate(true);
+}
+
 void SettingsActivity::openSleepTimeoutPicker() {
   startActivityForResult(
       std::make_unique<IntervalSelectionActivity>(
@@ -851,6 +912,7 @@ void SettingsActivity::openSleepTimeoutPicker() {
 }
 
 std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
+  if (setting.action == SettingAction::HomeButton) return tr(STR_CONFIGURE);
   if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
     return SETTINGS.*(setting.valuePtr) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   }
@@ -858,16 +920,18 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
     // Guard like the valueGetter branch below: a corrupt/migrated settings
     // byte must not index past the enum table.
     const uint8_t value = SETTINGS.*(setting.valuePtr);
-    if (value >= setting.enumValues.size()) return "";
-    return I18N.get(setting.enumValues[value]);
+    const auto enumLabels = setting.enumLabels();
+    if (value >= enumLabels.size()) return "";
+    return I18N.get(enumLabels[value]);
   }
   if (setting.type == SettingType::ENUM && setting.valueGetter) {
     const uint8_t value = setting.valueGetter();
     if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
       return setting.enumStringValues[value];
     }
-    if (value < setting.enumValues.size()) {
-      return I18N.get(setting.enumValues[value]);
+    const auto enumLabels = setting.enumLabels();
+    if (value < enumLabels.size()) {
+      return I18N.get(enumLabels[value]);
     }
     return "";
   }

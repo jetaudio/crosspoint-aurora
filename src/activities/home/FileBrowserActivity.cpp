@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Memory.h>
+#include <Utf8.h>
 
 #include <algorithm>
 
@@ -369,7 +370,7 @@ void FileBrowserActivity::confirmAndDelete(const std::string& fullPath, const st
 
   std::string heading = tr(STR_DELETE) + std::string("? ");
   startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, displayName, /*overlay=*/true), handler);
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, displayName), handler);
 }
 
 void FileBrowserActivity::activateIndex(const int index) {
@@ -554,6 +555,11 @@ bool FileBrowserActivity::handleButtons() {
 }
 
 std::string getFileName(std::string filename) {
+  // Display copy only — `files[]` keeps the raw directory-entry bytes, because
+  // FAT long-filename lookup is byte-exact: an NFC-normalized path would fail
+  // to open the NFD entry macOS wrote. Composing here fixes rendering (fonts
+  // carry precomposed syllables / letters only) without touching paths.
+  filename = utf8ComposeNfc(filename);
   if (filename.back() == '/') {
     filename.pop_back();
     if (!UITheme::getInstance().getTheme().showsFileIcons()) {
@@ -636,22 +642,14 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   // Tap opens/navigates; long-press prompts delete (physical buttons stay in loop()).
   props.inputMask = fui::InputTouch | fui::InputLongPress;
   props.valueInset = 8;  // air between the extension and the row edge
-  // File names in the small font, wrapping onto a second line inside the same
-  // row height (rowHeight is derived from the small font itself: two of its
-  // lines plus 8, so two small lines always fit), so long names show more
-  // text. maxLines=2 doubles as the caller-owned marker: an all-default
-  // smallText fails textStyleUnset and Screen::list() would substitute
-  // bodyText back (FONT_SLOT_SMALL is 0).
+  // Names use up to two small-font lines; shared list layout sizes each row.
   fui::TextStyle label = screen.theme().smallText;
   label.maxLines = 2;
   props.labelText = label;
+
   // The trailing value here is just the short extension: skip the balanced
   // 60%-band wrap cap and let both name lines run the full width before it.
   props.balanceWrappedLabelWithValue = false;
-  // Wrapped two-line names shrink how many rows fit a page, so the last row
-  // of a page can end up in leftover space: draw it as a partial preview so
-  // files past the fold are visibly present, not silently absent.
-  props.partialTrailingRow = true;
   syncListViewport(screen, props);
   screen.list(props);
 }
@@ -691,7 +689,6 @@ void FileBrowserActivity::drawFooter() {
 }
 
 size_t FileBrowserActivity::findEntry(const std::string& name) const {
-  for (size_t i = 0; i < files.size(); i++)
-    if (files[i] == name) return i;
-  return 0;
+  const auto entry = std::find(files.begin(), files.end(), name);
+  return entry != files.end() ? static_cast<size_t>(entry - files.begin()) : 0;
 }

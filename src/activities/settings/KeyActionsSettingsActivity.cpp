@@ -6,6 +6,7 @@
 
 #include "ConfigurableKeys.h"
 #include "CrossPointSettings.h"
+#include "HomeButtonSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
@@ -14,13 +15,14 @@
 namespace fui = freeink::ui;
 
 namespace {
-// Display order: the capacitive Home key, then every key this board lets the
-// user bind, then the power button. A tap row and a hold row for each -- the
-// keys themselves come from CONFIGURABLE_KEYS so a build that has more of them
-// (or fewer) needs no edit here.
+// Display order: the capacitive Home key (tap / double tap / long press, the
+// upstream home-button trio), then every key this board lets the user bind,
+// then the power button. A tap row and a hold row for each -- the keys
+// themselves come from CONFIGURABLE_KEYS so a build that has more of them (or
+// fewer) needs no edit here.
 const std::vector<StrId>& rowNames() {
   static const std::vector<StrId> rows = [] {
-    std::vector<StrId> v{StrId::STR_HOME_KEY_TAP, StrId::STR_HOME_KEY_HOLD};
+    std::vector<StrId> v(std::begin(home_button::GESTURE_LABELS), std::end(home_button::GESTURE_LABELS));
     for (const ConfigurableKey& key : CONFIGURABLE_KEYS) {
       v.push_back(key.tapName);
       v.push_back(key.holdName);
@@ -73,8 +75,9 @@ std::string KeyActionsSettingsActivity::valueText(const SettingInfo& setting) co
   if (setting.type == SettingType::TOGGLE) {
     return I18N.get(value ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF);
   }
-  if (setting.type == SettingType::ENUM && !setting.enumValues.empty()) {
-    return I18N.get(setting.enumValues[value % setting.enumValues.size()]);
+  const auto labels = setting.enumLabels();
+  if (setting.type == SettingType::ENUM && !labels.empty()) {
+    return I18N.get(labels[value % labels.size()]);
   }
   return "";
 }
@@ -97,13 +100,14 @@ void KeyActionsSettingsActivity::activateIndex(const int index) {
     requestUpdate();
     return;
   }
-  if (setting.type != SettingType::ENUM || setting.enumValues.empty()) return;
+  const auto labels = setting.enumLabels();
+  if (setting.type != SettingType::ENUM || labels.empty()) return;
 
   // Every row here is a long list of actions, so always the picker: cycling
   // twelve values one press at a time is not a way to change a binding.
   app.clearTapFlash();  // the popup repaints over the row; a flash would linger
-  optionPopup.show(setting.nameId, setting.enumValues.data(), static_cast<int>(setting.enumValues.size()),
-                   SETTINGS.*valuePtr % static_cast<uint8_t>(setting.enumValues.size()), [this, valuePtr](int idx) {
+  optionPopup.show(setting.nameId, labels.data(), static_cast<int>(labels.size()),
+                   SETTINGS.*valuePtr % static_cast<uint8_t>(labels.size()), [this, valuePtr](int idx) {
                      SETTINGS.*valuePtr = static_cast<uint8_t>(idx);
                      SETTINGS.saveToFile();
                      requestUpdate();

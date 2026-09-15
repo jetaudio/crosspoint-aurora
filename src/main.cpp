@@ -13,6 +13,7 @@
 #include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
+#include <HalMemory.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
@@ -133,7 +134,7 @@ EpdFontFamily smallFontFamily(&smallFont);
 // by every menu/status/home screen; applySystemUiFont() registers the one chosen
 // by SETTINGS.systemFont. Size is fixed (10 / 12) — only the typeface changes.
 //   Noto Sans  — the default Aurora look (notosansui_* + Hebrew fallback).
-//   Ubuntu     — upstream's Medium UI weight (ubuntu_*_medium), whose fontstack
+//   Ubuntu     — upstream's UI face (ubuntu_*_regular), whose fontstack
 //                already carries the Vietnamese cut plus Hebrew and Arabic
 //                fallbacks, so aurora no longer needs its own Ubuntu-VN build.
 EpdFont uiNoto10RegularFont(&notosansui_10_regular);
@@ -143,10 +144,10 @@ EpdFont uiNoto12RegularFont(&notosansui_12_regular);
 EpdFont uiNoto12BoldFont(&notosansui_12_bold);
 EpdFontFamily uiNoto12FontFamily(&uiNoto12RegularFont, &uiNoto12BoldFont);
 
-EpdFont uiUbuntu10RegularFont(&ubuntu_10_medium);
+EpdFont uiUbuntu10RegularFont(&ubuntu_10_regular);
 EpdFont uiUbuntu10BoldFont(&ubuntu_10_bold);
 EpdFontFamily uiUbuntu10FontFamily(&uiUbuntu10RegularFont, &uiUbuntu10BoldFont);
-EpdFont uiUbuntu12RegularFont(&ubuntu_12_medium);
+EpdFont uiUbuntu12RegularFont(&ubuntu_12_regular);
 EpdFont uiUbuntu12BoldFont(&ubuntu_12_bold);
 EpdFontFamily uiUbuntu12FontFamily(&uiUbuntu12RegularFont, &uiUbuntu12BoldFont);
 
@@ -300,8 +301,17 @@ void restartToHomeAfterStorageHandoff() {
   ESP.restart();
 }
 
+void toggleFrontlight() {
+  if (!Frontlight.present()) return;
+  const bool lightOn = !Frontlight.isOn();
+  Frontlight.setOn(lightOn);
+  SETTINGS.frontlightOn = lightOn ? 1 : 0;
+  SETTINGS.saveToFile();
+  LOG_INF("LIGHT", "Frontlight toggled %s", lightOn ? "on" : "off");
+}
+
 bool handleX4ProFrontlightDoubleClick() {
-  if (!BoardConfig::isX4Pro() || !gpio.wasReleased(HalGPIO::BTN_POWER)) {
+  if (!BoardConfig::isX4Pro() || !SETTINGS.doubleClickPwrLight || !gpio.wasReleased(HalGPIO::BTN_POWER)) {
     return false;
   }
 
@@ -317,11 +327,7 @@ bool handleX4ProFrontlightDoubleClick() {
   }
 
   lastX4ProPowerClickAt = 0;
-  const bool lightOn = !Frontlight.isOn();
-  Frontlight.setOn(lightOn);
-  SETTINGS.frontlightOn = lightOn ? 1 : 0;
-  SETTINGS.saveToFile();
-  LOG_INF("LIGHT", "Frontlight toggled %s by power-button double-click", lightOn ? "on" : "off");
+  toggleFrontlight();
   return true;
 }
 
@@ -352,7 +358,7 @@ static bool loadSleepFrameBuffer() {
 // `reason` is recorded in the battery log's SLEEP row. The console dies with
 // the CPU, so that row is the only evidence left of which path took the device
 // down -- the timeout, a key bound to Sleep, the low-battery guard or a tile.
-void enterDeepSleep(bool fromTimeout = false, const char* reason = "other") {
+void enterDeepSleep(bool fromTimeout = false, const char* reason = "other", bool powerOff = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   // Retire the render task first. Everything below runs on this task: the sleep
   // screen paints from SleepActivity::onEnter(), then the panel, the SD card and
@@ -404,9 +410,10 @@ void enterDeepSleep(bool fromTimeout = false, const char* reason = "other") {
 
   halTiltSensor.deepSleep();
   display.deepSleep();
-  LOG_DBG("MAIN", "Entering deep sleep");
+  Storage.prepareForDeepSleep();
+  LOG_DBG("MAIN", powerOff ? "Entering ship mode" : "Entering deep sleep");
 
-  powerManager.startDeepSleep(gpio);
+  powerManager.startDeepSleep(gpio, powerOff);
 }
 
 // --- Configurable button actions ---------------------------------------------
@@ -488,15 +495,9 @@ static bool runButtonAction(const uint8_t action) {
         renderer.displayBuffer(HalDisplay::HALF_REFRESH);
       }
       return true;
-    case CrossPointSettings::BTN_ACT_FRONTLIGHT: {
-      if (!Frontlight.present()) return true;
-      const bool lightOn = !Frontlight.isOn();
-      Frontlight.setOn(lightOn);
-      SETTINGS.frontlightOn = lightOn ? 1 : 0;
-      SETTINGS.saveToFile();
-      LOG_INF("LIGHT", "Frontlight toggled %s by button action", lightOn ? "on" : "off");
+    case CrossPointSettings::BTN_ACT_FRONTLIGHT:
+      toggleFrontlight();
       return true;
-    }
     case CrossPointSettings::BTN_ACT_TOUCH_TOGGLE: {
       // Toggles the reader's touch controls setting (same as the control center
       // tile), not a digitizer kill-switch: the UI stays tappable, only the
@@ -510,6 +511,12 @@ static bool runButtonAction(const uint8_t action) {
     case CrossPointSettings::BTN_ACT_SLEEP:
       if (millis() < allowSleepAt) return true;
       enterDeepSleep(false, "key-action");
+      return true;
+    case CrossPointSettings::BTN_ACT_POWER_OFF:
+      // Same sleep screen and teardown as Sleep; the charger then opens the
+      // pack instead of the ESP arming a wake. Back on with a held power button.
+      if (millis() < allowSleepAt) return true;
+      enterDeepSleep(false, "power-off", /*powerOff=*/true);
       return true;
     default:
       return false;
@@ -572,20 +579,9 @@ static bool serviceConfigurableButton(ConfigurableButton& state, const bool isDo
 static bool dispatchConfigurableButtons() {
   bool consumed = false;
 
-  // Capacitive Home key: the SDK already classifies tap vs hold for it.
-  if (gpio.hasHomeKey()) {
-    if (gpio.wasHomeKeyLongPressed()) {
-      consumed = runButtonAction(SETTINGS.homeKeyLongAction) || consumed;
-    } else if (gpio.wasHomeKeyTapped()) {
-      // Back and Home already reach their consumers through the mapped-input
-      // paths (wasReleased(Back) / wasHomeGesture), which know the activity
-      // stack; re-raising them here would double-fire.
-      if (SETTINGS.homeKeyShortAction != CrossPointSettings::BTN_ACT_BACK &&
-          SETTINGS.homeKeyShortAction != CrossPointSettings::BTN_ACT_HOME) {
-        consumed = runButtonAction(SETTINGS.homeKeyShortAction) || consumed;
-      }
-    }
-  }
+  // The capacitive Home key is not dispatched here: MappedInputManager::update()
+  // classifies its tap / double-tap / hold into a HomeButtonAction that the
+  // mapped-input queries and loop() consume directly.
 
   // Every key the user gets to bind. They are ordinary board keys as far as the
   // HAL is concerned -- debounced, edge-detected, masked out of the normal
@@ -709,9 +705,11 @@ void setup() {
   powerManager.begin();
 
   const auto wakeupReason = gpio.getWakeupReason();
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && !gpio.verifyPowerButtonWakeup()) {
-    powerManager.startDeepSleep(gpio);
-  }
+  // Sample the wake hold now — a click wake is released within milliseconds of
+  // boot — but defer the sleep-or-boot decision until SETTINGS is loaded below:
+  // click-to-wake is a setting, and an X4 battery power-off cuts all power, so
+  // only SD state survives to the next boot.
+  const bool wakeHoldVerified = wakeupReason != HalGPIO::WakeupReason::PowerButton || gpio.verifyPowerButtonWakeup();
 
   // Not a wake anyone asked for: the previous sleep found the power line still
   // asserted after the release poll timed out, so instead of spinning on it (the
@@ -722,8 +720,10 @@ void setup() {
     powerManager.startDeepSleep(gpio);
   }
 
-  const auto recoveryButton =
-      BoardConfig::isX4Pro() ? MappedInputManager::Button::Down : MappedInputManager::Button::Up;
+  // X4 Pro and X4 Classic both map BTN_UP to GPIO0 — an ESP32-S3 boot strap — so
+  // gate recovery on the non-strap Down key (GPIO7) to avoid a stuck-in-recovery loop.
+  const auto recoveryButton = (BoardConfig::isX4Pro() || BoardConfig::isX4Classic()) ? MappedInputManager::Button::Down
+                                                                                     : MappedInputManager::Button::Up;
   const bool recoveryFirmwareMode = wakeupReason == HalGPIO::WakeupReason::PowerButton && !BoardConfig::isPaperMono() &&
                                     mappedInputManager.isPressed(recoveryButton);
 
@@ -760,7 +760,8 @@ void setup() {
   const bool isPersistedSleepWake = isSleepWake && !APP_STATE.showBootScreen;
 
   if (recoveryFirmwareMode) {
-    LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", BoardConfig::isX4Pro() ? "DOWN" : "UP");
+    LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)",
+            (BoardConfig::isX4Pro() || BoardConfig::isX4Classic()) ? "DOWN" : "UP");
   }
 
   // Touch boards default the reader menu to the toolbar overlay instead of the
@@ -786,18 +787,28 @@ void setup() {
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
+      // With Short Power Button Press = Sleep, a single click wakes on any
+      // device; otherwise the button must still be held (ghost-wake debounce).
+      if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
+        LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
+        Storage.prepareForDeepSleep();
+        powerManager.startDeepSleep(gpio);
+      }
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
-#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_PAPERMONO
-      // X4 Pro must stay awake so USB Serial/JTAG remains available after
-      // leaving USB Drive and reconnecting the cable. Paper Mono has no
-      // armable GPIO wake because its button is behind the PMIC. Sleeping
-      // either device here would strand it in a USB-replug boot loop.
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4
+      // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
+      // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
+      // (its button is behind the PMIC). EEGO A4's post-flash reset reads as
+      // POWERON (native-USB), so a flash would otherwise be misclassified as a
+      // USB-power cold boot and sleep. Sleeping any of these here would strand
+      // the device in a USB-replug boot loop (or sleep right after a flash).
       break;
 #else
+      Storage.prepareForDeepSleep();
       powerManager.startDeepSleep(gpio);
       break;
 #endif
@@ -1687,8 +1698,14 @@ void loop() {
   renderer.setGlyphWeight(SETTINGS.textStrokeWeight);
 
   if (Serial && millis() - lastMemPrint >= 10000) {
-    LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
-            ESP.getHeapSize(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+    const auto heap = HalMemory::getInternalHeap();
+    LOG_INF("MEM", "Free: %zu bytes, Total: %zu bytes, Min Free: %zu bytes, MaxAlloc: %zu bytes", heap.freeBytes,
+            heap.totalBytes, heap.minFreeBytes, heap.largestBlockBytes);
+#ifdef BOARD_HAS_PSRAM
+    const auto psram = HalMemory::getPsramHeap();
+    LOG_INF("MEM", "PSRAM: Free: %zu bytes, Total: %zu bytes, Min Free: %zu bytes, MaxAlloc: %zu bytes",
+            psram.freeBytes, psram.totalBytes, psram.minFreeBytes, psram.largestBlockBytes);
+#endif
     lastMemPrint = millis();
   }
 
@@ -2208,8 +2225,12 @@ void loop() {
 #endif
 
   // Refresh screen when power button is short-pressed with FORCE_REFRESH setting.
-  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH &&
-      mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
+  if (mappedInputManager.homeButtonAction() == HomeButtonAction::ToggleFrontlight) {
+    toggleFrontlight();
+  }
+  if (mappedInputManager.homeButtonAction() == HomeButtonAction::Refresh ||
+      (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH &&
+       mappedInputManager.wasReleased(MappedInputManager::Button::Power))) {
     LOG_DBG("MAIN", "Manual screen refresh triggered");
     if (!activityManager.handleForcedRefresh()) {
       RenderLock lock;
@@ -2219,7 +2240,11 @@ void loop() {
 
   // Refresh the battery icon when USB is plugged or unplugged.
   // Placed after sleep guards so we never queue a render that won't be processed.
-  if (gpio.wasUsbStateChanged()) {
+  // Not while reading: there a repaint is a full page re-render (visible
+  // flash, the AA pass re-running, and a frontlight dip under the refresh
+  // load); the reader's status bar picks the charging state up on the next
+  // page turn instead.
+  if (gpio.wasUsbStateChanged() && !activityManager.isReaderActivity()) {
     activityManager.requestUpdate();
   }
 
@@ -2248,10 +2273,18 @@ void loop() {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
       // If we've been inactive for a while, increase the delay to save power
       powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
-      // Sleeping already consumed the idle time; falling through to delay(50)
-      // as well would just add latency to the next button press.
+      // Sleeping already consumed the idle time; falling through to a delay as
+      // well would just add latency to the next button press. When light sleep
+      // is unavailable, sleep in short slices and wake the poll as soon as a
+      // button contact closes: InputManager commits a press only when two
+      // consecutive polls agree, so a press shorter than one 50 ms sleep could
+      // land in a single sample and be lost.
       if (!tryIdleLightSleep(millis() - lastActivityTime)) {
-        delay(50);
+        const unsigned long idleStart = millis();
+        while (millis() - idleStart < 50) {
+          delay(10);
+          if (gpio.rawInputActive()) break;
+        }
       }
     } else {
       // Short delay to prevent tight loop while still being responsive

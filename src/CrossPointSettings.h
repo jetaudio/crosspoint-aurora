@@ -1,9 +1,12 @@
 #pragma once
+
 #include <ArduinoJson.h>
 #include <Epub/ReaderRenderSpec.h>
 #include <PersistableStore.h>
 
 #include <cstdint>
+
+#include "util/HomeButtonInput.h"
 
 class CrossPointSettings : public PersistableStore<CrossPointSettings> {
  private:
@@ -172,6 +175,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     BTN_ACT_FRONTLIGHT = 9,
     BTN_ACT_TOUCH_TOGGLE = 10,
     BTN_ACT_SLEEP = 11,
+    // Ship mode: the charger opens its BATFET and the pack is disconnected
+    // outright (no deep-sleep draw at all). Holding the power button (the
+    // BQ25896 /QON pin) or plugging in USB brings it back with a cold boot.
+    // Boards without a charger IC that can do this fall back to deep sleep.
+    BTN_ACT_POWER_OFF = 12,
     BUTTON_ACTION_COUNT
   };
 
@@ -283,11 +291,20 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t textStrokeWeight = 3;
   // Short power button click behaviour
   uint8_t shortPwrBtn = IGNORE;
+  // X4 Pro: double-click power toggles the frontlight. Disabling frees the
+  // power button for shortPwrBtn actions without the double-click wait.
+  uint8_t doubleClickPwrLight = 1;
+  // Aurora defaults: the key is Back (the left-edge swipe misfires from page
+  // taps), Home stays one double-tap or a bottom-edge swipe away, and a hold
+  // opens the control center.
+  uint8_t homeButtonTapAction = static_cast<uint8_t>(HomeButtonAction::Back);
+  uint8_t homeButtonDoubleTapAction = static_cast<uint8_t>(HomeButtonAction::Home);
+  uint8_t homeButtonLongPressAction = static_cast<uint8_t>(HomeButtonAction::ControlCenter);
   // Configurable button actions (BUTTON_ACTION values). Short = tap, long =
-  // hold past the long-press threshold. The user/side button is the PCA9535
-  // expander key on the LilyGo T5S3 (labelled IO48 on the case).
-  uint8_t homeKeyShortAction = BTN_ACT_BACK;
-  uint8_t homeKeyLongAction = BTN_ACT_CONTROL_CENTER;
+  // hold past the long-press threshold. The capacitive Home key is not in
+  // this table: it has its own tap / double-tap / long-press trio above
+  // (HomeButtonAction). The user/side button is the PCA9535 expander key on
+  // the LilyGo T5S3 (labelled IO48 on the case).
   uint8_t userBtnShortAction = BTN_ACT_PAGE_NEXT;
   uint8_t userBtnLongAction = BTN_ACT_TOUCH_TOGGLE;
   // Keys soldered to the four pads a T5 S3 Pro Lite has spare where the LoRa
@@ -399,6 +416,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   char dropCapFontName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Show the title and author read from inside each book rather than its
+  // filename. Users can disable this to make index rebuilds skip EPUB parsing.
+  uint8_t libraryUseMetadata = 1;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
   uint8_t removeReadBooksFromRecents = 0;
   // Move epub to /Read/ folder on SD card when finished (0 = disabled, 1 = enabled)
@@ -440,6 +460,12 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t frontlightRestoreOnWake = 1;
   // Language setting (Language enum index, default 0 = EN)
   uint8_t language = 0;
+  // Keyboard layouts the user can reach, using keyboard_layouts::ALL table bits.
+  // 0 means "not configured", resolved to the UI language's layout plus English.
+  // Any other value is an explicit choice and is used as-is: the language of the
+  // books someone reads is not necessarily the language of their UI.
+  // See keyboard_layouts:: for the bit assignment and the defaulting rules.
+  uint16_t keyboardLayouts = 0;
   // Quick Resume: keep current content visible with moon icon instead of showing a static sleep screen.
   uint8_t quickResumeSleepScreen = QUICK_RESUME_NEVER;
 

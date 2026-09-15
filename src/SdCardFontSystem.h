@@ -58,10 +58,11 @@ class SdCardFontSystem {
 
  private:
   // Load the active SD family at the built-in UI point sizes and register each
-  // as a size-matched CJK fallback for the corresponding UI font, so CJK book
-  // titles/list rows render at the same size as the surrounding Latin UI text.
-  // No-op when no SD family is loaded. Safe to call repeatedly (sizes already
-  // loaded are reused).
+  // as a size-matched script fallback for the corresponding UI font, so book
+  // titles/list rows in scripts the built-ins lack (CJK, Greek, Cyrillic, ...)
+  // render at the same size as the surrounding Latin UI text. No-op when no SD
+  // family is loaded. Safe to call repeatedly (sizes already loaded are
+  // reused).
   void setupUiFallbacks(GfxRenderer& renderer);
   // Keep the selected drop-cap face loaded in step with the reader's size
   // setting. The face is chosen by SETTINGS.dropCapFontName from the standalone

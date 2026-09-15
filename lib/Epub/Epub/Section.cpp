@@ -1,5 +1,6 @@
 #include "Section.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -44,12 +45,17 @@ namespace {
 // v40: Ruby groups remain intact when a large text block is soft-flushed.
 // v41: Simple HTML table rows are laid out as positioned columns instead of
 //      flattened paragraphs with synthetic row/cell labels.
-// v42 (aurora): header carries the drop-cap + small-caps chapter-opening flags and the
-//      drop-cap font id, so toggling either setting — or changing the /.dropcap face,
-//      whose identity drives the cap's wrap inset — re-paginates. Aurora had this at
-//      41 while upstream was still on 39; upstream has since published its own 40 and
-//      41, so it moves up to 42 to stay above every published upstream version.
-constexpr uint8_t SECTION_FILE_VERSION = 42;
+// v42: Closing a block strips inherited vertical margins and padding.
+// v43: Paragraph base direction excludes direction changes from inline elements.
+// v44: Persist internal-link rectangles with each page for touch navigation.
+// v45: Internal EPUB links preserve CSS superscript/subscript positioning.
+// v46: Ordered lists number their items, list-style-type: none suppresses markers,
+//      and <ul>/<ol> containers contribute their own margins/padding to child insets.
+// v47 (aurora): header carries the drop-cap + small-caps chapter-opening flags and the
+//      drop-cap font id, so toggling either setting -- or changing the /.dropcap face,
+//      whose identity drives the cap's wrap inset -- re-paginates. Kept one above the
+//      newest published upstream version so both caches invalidate each other.
+constexpr uint8_t SECTION_FILE_VERSION = 47;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects
@@ -278,6 +284,10 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   if (build_) {
     LOG_ERR("SCT", "startBuild called while a build is already active");
     return false;
+  }
+  // Reclaim rebuildable font caches before CSS and layout allocations.
+  if (auto* fontCache = renderer.getFontCacheManager()) {
+    fontCache->releaseSdFontCaches();
   }
   buildComplete_ = false;
   builtPageCount_ = 0;

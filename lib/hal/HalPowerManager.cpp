@@ -68,7 +68,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // Otherwise, no change needed
 }
 
-void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool powerOff) const {
   // Unmount the card while it is still powered and its bus is still up. Every
   // sleep write is already done by the time we get here (enterDeepSleep()'s last
   // one is the Quick Resume frame). Must precede BOTH the Xteink GPIO13 drop
@@ -145,6 +145,17 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
     delay(1000);  // allow the PMIC firmware time to drop power
   }
 #endif
+
+  if (powerOff) {
+    // Everything above has already parked the panel, the card and the rails, so
+    // the state on the pack side is the same one a sleep would leave. On
+    // battery the write below is the last thing this boot executes. The delay
+    // covers the BATFET turn-off time; if we are still here after it the board
+    // is on USB (or has no such charger) and sleeps normally instead.
+    if (gpio.enterChargerShipMode()) {
+      delay(500);
+    }
+  }
 
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.

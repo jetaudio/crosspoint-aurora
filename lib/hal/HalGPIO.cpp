@@ -243,11 +243,23 @@ unsigned long HalGPIO::getHeldTime() const {
   return injected > real ? injected : real;
 }
 
+bool HalGPIO::rawInputActive() {
+  if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
+  InputManager::ButtonAdcSample g1{}, g2{};
+  inputMgr.readButtonAdc(g1, g2);
+  // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.
+  constexpr int kIdleRailMin = 4000;
+  return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
+}
+
+
 unsigned long HalGPIO::getPowerButtonHeldTime() const { return inputMgr.getPowerButtonHeldTime(); }
 
 bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
 
 bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
+
+bool HalGPIO::wasHomeKeyPressed() const { return inputMgr.wasHomeKeyPressed(); }
 
 bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
 
@@ -312,7 +324,8 @@ void HalGPIO::setSharedConfirmPowerShortPressEmitsPower(const bool enabled) {
 bool HalGPIO::hasEdgeSideButtons() const {
   return BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3 ||
          BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX3Uc8279 ||
-         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro;
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Pro ||
+         BoardConfig::ACTIVE.board == BoardConfig::Board::XteinkX4Classic;
 }
 
 bool HalGPIO::isXteinkDevice() const {
@@ -322,7 +335,11 @@ bool HalGPIO::isXteinkDevice() const {
 }
 
 bool HalGPIO::verifyPowerButtonWakeup() {
-  if (BoardConfig::isPaperMono() || BoardConfig::ACTIVE.input.power < 0) {
+  // M5Paper v1.1: the classic ESP32's reset-to-setup() latency exceeds a normal
+  // wheel click, so a click wake is always released before this samples and
+  // verification would re-sleep on every wake. Its wheel has hard external
+  // pull-ups, so the ghost-wake debounce this implements is not needed.
+  if (BoardConfig::isPaperMono() || BoardConfig::isM5PaperV11() || BoardConfig::ACTIVE.input.power < 0) {
     return true;
   }
 
@@ -398,6 +415,38 @@ bool HalGPIO::isCharging() const {
   return chargeMonitor.isCharging();
 }
 
+bool HalGPIO::enterChargerShipMode() const {
+  const auto& g = BoardConfig::ACTIVE.batteryGauge;
+  if (g.chargerAddr == 0) return false;
+  // REG09: bit 5 BATFET_DIS (ship mode), bit 3 BATFET_DLY (wait tSM_DLY ~10 s
+  // before opening -- cleared so the cut is immediate), bit 2 BATFET_RST_EN
+  // (left as-is). Read-modify-write so the ICO / timer bits survive.
+  constexpr uint8_t BQ25896_REG_CTRL = 0x09;
+  constexpr uint8_t BQ25896_BATFET_DIS = 1u << 5;
+  constexpr uint8_t BQ25896_BATFET_DLY = 1u << 3;
+  TwoWire& bus =
+#if SOC_I2C_NUM > 1
+      (g.i2cBus == 1) ? Wire1 :
+#endif
+                      Wire;
+  bus.beginTransmission(g.chargerAddr);
+  bus.write(BQ25896_REG_CTRL);
+  if (bus.endTransmission(false) != 0 || bus.requestFrom(static_cast<int>(g.chargerAddr), 1) != 1) {
+    LOG_ERR("PWR", "Ship mode: charger REG09 read failed");
+    return false;
+  }
+  uint8_t reg09 = bus.read();
+  reg09 = static_cast<uint8_t>((reg09 | BQ25896_BATFET_DIS) & ~BQ25896_BATFET_DLY);
+  bus.beginTransmission(g.chargerAddr);
+  bus.write(BQ25896_REG_CTRL);
+  bus.write(reg09);
+  if (bus.endTransmission() != 0) {
+    LOG_ERR("PWR", "Ship mode: charger REG09 write failed");
+    return false;
+  }
+  return true;
+}
+
 bool HalGPIO::isChargeComplete() const {
   constexpr uint8_t BQ25896_PG_STAT = 1u << 2;
   constexpr uint8_t BQ25896_CHRG_DONE = 0x03;  // CHRG_STAT bits [4:3]
@@ -431,6 +480,18 @@ bool HalGPIO::isUsbConnected() const {
   return battery.isCharging();
 }
 
+bool HalGPIO::coldBootImpliesPowerButton() const {
+  // Xteink-style power topology: the power button energizes the rail until
+  // firmware latches it, so a no-USB POWERON can only be a still-held button
+  // boot, and plugging USB into an off device should charge-sleep, not boot.
+  // Everything else boots on any cold boot: boards with no USB detection at
+  // all (M5Paper v1.1, PaperColor, Murphy, de-link) would misread USB and
+  // post-flash boots as battery button boots, and STAT-only boards like the
+  // EEGO A4 misread them the same way once the charger terminates at 100%
+  // (STAT inactive reads as "no USB").
+  return isXteinkDevice() || BoardConfig::isPaperMono() || BoardConfig::isSticky();
+}
+
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
@@ -441,7 +502,8 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
       (wakeupCause == ESP_SLEEP_WAKEUP_GPIO || wakeupCause == ESP_SLEEP_WAKEUP_EXT1)) {
     return WakeupReason::PowerButton;
   }
-  if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected) {
+  if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_POWERON && !usbConnected &&
+      coldBootImpliesPowerButton()) {
     return WakeupReason::PowerButton;
   }
   if (wakeupCause == ESP_SLEEP_WAKEUP_UNDEFINED && resetReason == ESP_RST_UNKNOWN && usbConnected) {

@@ -41,8 +41,12 @@ class HalPowerManager {
   void setPowerSaving(bool enabled);
 
   // Setup wake up GPIO and enter deep sleep
-  // Should be called inside main loop() to handle the currentLockMode
-  void startDeepSleep(HalGPIO& gpio) const;
+  // Should be called inside main loop() to handle the currentLockMode.
+  // powerOff: after the same teardown, put the charger into ship mode so the
+  // pack is disconnected outright (see HalGPIO::enterChargerShipMode). If the
+  // board is still alive afterwards -- no such charger, or running from USB --
+  // it continues into ordinary deep sleep.
+  void startDeepSleep(HalGPIO& gpio, bool powerOff = false) const;
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;

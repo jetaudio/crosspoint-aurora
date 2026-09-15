@@ -12,6 +12,8 @@ extern const char STRINGS_AR_DATA[];
 extern const uint16_t OFFSETS_AR[];
 extern const char STRINGS_BE_DATA[];
 extern const uint16_t OFFSETS_BE[];
+extern const char STRINGS_BG_DATA[];
+extern const uint16_t OFFSETS_BG[];
 extern const char STRINGS_BS_DATA[];
 extern const uint16_t OFFSETS_BS[];
 extern const char STRINGS_CA_DATA[];
@@ -26,6 +28,8 @@ extern const char STRINGS_DE_DATA[];
 extern const uint16_t OFFSETS_DE[];
 extern const char STRINGS_ES_DATA[];
 extern const uint16_t OFFSETS_ES[];
+extern const char STRINGS_FA_DATA[];
+extern const uint16_t OFFSETS_FA[];
 extern const char STRINGS_FI_DATA[];
 extern const uint16_t OFFSETS_FI[];
 extern const char STRINGS_FR_DATA[];
@@ -77,35 +81,37 @@ enum class Language : uint8_t {
   EN  = 0,  // en
   AR  = 1,  // ar
   BE  = 2,  // be
-  BS  = 3,  // bs
-  CA  = 4,  // ca
-  CAV = 5,  // ca-valencia
-  CS  = 6,  // cs
-  DA  = 7,  // da
-  DE  = 8,  // de
-  ES  = 9,  // es
-  FI  = 10,  // fi
-  FR  = 11,  // fr
-  HE  = 12,  // he
-  HU  = 13,  // hu
-  ID  = 14,  // id
-  IT  = 15,  // it
-  KK  = 16,  // kk
-  LT  = 17,  // lt
-  NB  = 18,  // nb
-  NL  = 19,  // nl
-  OOK = 20,  // ook
-  PL  = 21,  // pl
-  PT  = 22,  // pt-BR
-  P2  = 23,  // pt-PT
-  RO  = 24,  // ro
-  RU  = 25,  // ru
-  SK  = 26,  // sk
-  SI  = 27,  // sl
-  SV  = 28,  // sv
-  TR  = 29,  // tr
-  UK  = 30,  // uk
-  VI  = 31,  // vi
+  BG  = 3,  // bg
+  BS  = 4,  // bs
+  CA  = 5,  // ca
+  CAV = 6,  // ca-valencia
+  CS  = 7,  // cs
+  DA  = 8,  // da
+  DE  = 9,  // de
+  ES  = 10,  // es
+  FA  = 11,  // fa
+  FI  = 12,  // fi
+  FR  = 13,  // fr
+  HE  = 14,  // he
+  HU  = 15,  // hu
+  ID  = 16,  // id
+  IT  = 17,  // it
+  KK  = 18,  // kk
+  LT  = 19,  // lt
+  NB  = 20,  // nb
+  NL  = 21,  // nl
+  OOK = 22,  // ook
+  PL  = 23,  // pl
+  PT  = 24,  // pt-BR
+  P2  = 25,  // pt-PT
+  RO  = 26,  // ro
+  RU  = 27,  // ru
+  SK  = 28,  // sk
+  SI  = 29,  // sl
+  SV  = 30,  // sv
+  TR  = 31,  // tr
+  UK  = 32,  // uk
+  VI  = 33,  // vi
   _COUNT
 };
 
@@ -238,6 +244,7 @@ enum class StrId : uint16_t {
   STR_EOB_HOME,
   STR_EOB_CONTINUE_WITH,
   STR_SHORT_PWR_BTN,
+  STR_DBL_CLICK_PWR_LIGHT,
   STR_ORIENTATION,
   STR_SIDE_BTN_LAYOUT,
   STR_TOUCH_READER_CONTROLS,
@@ -248,8 +255,6 @@ enum class StrId : uint16_t {
   STR_LONG_PRESS_BEHAVIOR_SKIP,
   STR_LONG_PRESS_BEHAVIOR_ORIENTATION,
   STR_LONG_PRESS_MENU,
-  STR_HOME_KEY_TAP,
-  STR_HOME_KEY_HOLD,
   STR_USER_BTN_TAP,
   STR_USER_BTN_HOLD,
   STR_KEY_G10_TAP,
@@ -289,12 +294,34 @@ enum class StrId : uint16_t {
   STR_HYPHENATION,
   STR_TIME_TO_SLEEP,
   STR_SHOW_HIDDEN_FILES,
+  STR_LIBRARY,
+  STR_LIBRARY_EMPTY,
+  STR_LIBRARY_NO_RESULTS,
+  STR_LIBRARY_SEARCH_UNAVAILABLE,
+  STR_LIBRARY_UNKNOWN_TITLE,
+  STR_LIBRARY_UNKNOWN_AUTHOR,
+  STR_LIBRARY_TITLE_UNSORTED,
+  STR_LIBRARY_TAB_RECENT,
+  STR_LIBRARY_TAB_TITLE,
+  STR_LIBRARY_TAB_AUTHOR,
+  STR_LIBRARY_SEARCH,
+  STR_LIBRARY_HOLD_SORT,
+  STR_LIBRARY_HOLD_GROUPS,
+  STR_LIBRARY_POSITION,
+  STR_LIBRARY_GROUP_POSITION,
+  STR_LIBRARY_USE_METADATA,
+  STR_LIBRARY_REBUILD,
+  STR_LIBRARY_REBUILDING,
+  STR_LIBRARY_REBUILD_DONE,
+  STR_LIBRARY_REBUILD_FAILED,
   STR_REMOVE_READ_FROM_RECENTS,
   STR_MOVE_FINISHED_TO_READ,
   STR_REFRESH_FREQ,
   STR_KOREADER_SYNC,
   STR_CHECK_UPDATES,
   STR_LANGUAGE,
+  STR_KEYBOARD_LAYOUTS,
+  STR_ABOUT,
   STR_CLEAR_READING_CACHE,
   STR_USERNAME,
   STR_PASSWORD,
@@ -344,6 +371,8 @@ enum class StrId : uint16_t {
   STR_ALWAYS,
   STR_IGNORE,
   STR_SLEEP,
+  STR_ACTION_POWER_OFF,
+  STR_PAGE_TURN,
   STR_FORCE_REFRESH,
   STR_PORTRAIT,
   STR_LANDSCAPE_CW,
@@ -393,6 +422,8 @@ enum class StrId : uint16_t {
   STR_ERROR_MSG,
   STR_UNNAMED,
   STR_HOLD_OPEN_TO_DELETE,
+  STR_HOLD_OPEN_TO_REMOVE,
+  STR_HOLD_OPEN_FOR_ACTIONS,
   STR_NO_SERVER_URL,
   STR_FETCH_FEED_FAILED,
   STR_PARSE_FEED_FAILED,
@@ -484,7 +515,6 @@ enum class StrId : uint16_t {
   STR_THEME_AURORA,
   STR_HOME_CONTINUE,
   STR_HOME_EMPTY_HINT,
-  STR_LIBRARY,
   STR_SHOW_BUTTON_HINTS,
   STR_BUTTON_HINTS_FRONT_ONLY,
   STR_BUTTON_HINTS_FRONT_EDGE,
@@ -500,9 +530,7 @@ enum class StrId : uint16_t {
   STR_COVER_CUSTOM,
   STR_QUICK_RESUME,
   STR_TRANSPARENT,
-  STR_MENU_RECENT_BOOKS,
   STR_REMOVE_FROM_RECENTS,
-  STR_NO_RECENT_BOOKS,
   STR_CALIBRE_DESC,
   STR_FORGET_AND_REMOVE,
   STR_FORGET_BUTTON,
@@ -532,7 +560,6 @@ enum class StrId : uint16_t {
   STR_PAGES_SEPARATOR,
   STR_BOOK_PREFIX,
   STR_CALIBRE_URL_HINT,
-  STR_SYNCING_TIME,
   STR_CALC_HASH,
   STR_HASH_FAILED,
   STR_FETCH_PROGRESS,
@@ -594,6 +621,7 @@ enum class StrId : uint16_t {
   STR_NO_FONTS_AVAILABLE,
   STR_FONT_INSTALLED,
   STR_FONT_INSTALL_FAILED,
+  STR_INVALID_FONT_MANIFEST,
   STR_INSTALLED,
   STR_DOWNLOAD_ALL,
   STR_UPDATE_ALL,
@@ -653,6 +681,13 @@ enum class StrId : uint16_t {
   STR_BATT_UNACCOUNTED,
   STR_BATT_SLEEP_STALL,
   STR_BATT_PARK_FAILED,
+  STR_HOME_SHORTCUT,
+  STR_HOME_BUTTON,
+  STR_CONFIGURE,
+  STR_HOME_BUTTON_TAP,
+  STR_HOME_BUTTON_DOUBLE_TAP,
+  STR_HOME_BUTTON_LONG_PRESS,
+  STR_TOGGLE_FRONTLIGHT,
   // Sentinel - must be last
   _COUNT
 };
@@ -672,6 +707,8 @@ inline LangStrings getLanguageStrings(Language lang) {
       return {i18n_strings::STRINGS_AR_DATA, i18n_strings::OFFSETS_AR};
     case Language::BE:
       return {i18n_strings::STRINGS_BE_DATA, i18n_strings::OFFSETS_BE};
+    case Language::BG:
+      return {i18n_strings::STRINGS_BG_DATA, i18n_strings::OFFSETS_BG};
     case Language::BS:
       return {i18n_strings::STRINGS_BS_DATA, i18n_strings::OFFSETS_BS};
     case Language::CA:
@@ -686,6 +723,8 @@ inline LangStrings getLanguageStrings(Language lang) {
       return {i18n_strings::STRINGS_DE_DATA, i18n_strings::OFFSETS_DE};
     case Language::ES:
       return {i18n_strings::STRINGS_ES_DATA, i18n_strings::OFFSETS_ES};
+    case Language::FA:
+      return {i18n_strings::STRINGS_FA_DATA, i18n_strings::OFFSETS_FA};
     case Language::FI:
       return {i18n_strings::STRINGS_FI_DATA, i18n_strings::OFFSETS_FI};
     case Language::FR:
@@ -742,36 +781,38 @@ constexpr uint8_t getLanguageCount() { return static_cast<uint8_t>(Language::_CO
 //    0: EN   en       English
 //    1: AR   ar       العربية
 //    2: BE   be       Беларуская
-//    3: BS   bs       Bosanski
-//    4: CA   ca       Català
-//    5: CAV  ca-valencia Valencià
-//    6: CS   cs       Čeština
-//    7: DA   da       Dansk
-//    8: DE   de       Deutsch
-//    9: ES   es       Español
-//   10: FI   fi       Suomi
-//   11: FR   fr       Français
-//   12: HE   he       עברית
-//   13: HU   hu       Magyar
-//   14: ID   id       Bahasa Indonesia
-//   15: IT   it       Italiano
-//   16: KK   kk       Қазақша
-//   17: LT   lt       Lietuvių
-//   18: NB   nb       Norsk bokmål
-//   19: NL   nl       Nederlands
-//   20: OOK  ook      Orangutan
-//   21: PL   pl       Polski
-//   22: PT   pt-BR    Português (Brasil)
-//   23: P2   pt-PT    Português (Portugal)
-//   24: RO   ro       Română
-//   25: RU   ru       Русский
-//   26: SK   sk       Slovenčina
-//   27: SI   sl       Slovenščina
-//   28: SV   sv       Svenska
-//   29: TR   tr       Türkçe
-//   30: UK   uk       Українська
-//   31: VI   vi       Tiếng Việt
-constexpr uint8_t SORTED_LANGUAGE_INDICES[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+//    3: BG   bg       Български
+//    4: BS   bs       Bosanski
+//    5: CA   ca       Català
+//    6: CAV  ca-valencia Valencià
+//    7: CS   cs       Čeština
+//    8: DA   da       Dansk
+//    9: DE   de       Deutsch
+//   10: ES   es       Español
+//   11: FA   fa       فارسی
+//   12: FI   fi       Suomi
+//   13: FR   fr       Français
+//   14: HE   he       עברית
+//   15: HU   hu       Magyar
+//   16: ID   id       Bahasa Indonesia
+//   17: IT   it       Italiano
+//   18: KK   kk       Қазақша
+//   19: LT   lt       Lietuvių
+//   20: NB   nb       Norsk bokmål
+//   21: NL   nl       Nederlands
+//   22: OOK  ook      Orangutan
+//   23: PL   pl       Polski
+//   24: PT   pt-BR    Português (Brasil)
+//   25: P2   pt-PT    Português (Portugal)
+//   26: RO   ro       Română
+//   27: RU   ru       Русский
+//   28: SK   sk       Slovenčina
+//   29: SI   sl       Slovenščina
+//   30: SV   sv       Svenska
+//   31: TR   tr       Türkçe
+//   32: UK   uk       Українська
+//   33: VI   vi       Tiếng Việt
+constexpr uint8_t SORTED_LANGUAGE_INDICES[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33};
 
 static_assert(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]) == getLanguageCount(),
               "SORTED_LANGUAGE_INDICES size mismatch");

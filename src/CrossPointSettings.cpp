@@ -111,6 +111,12 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   // Language -- managed by LanguageSelectActivity, not in SettingsList.
   // Stored as ISO code string ("EN", "DE", ...) for stability across enum reorders.
   doc["language"] = (language < getLanguageCount()) ? LANGUAGE_CODES[language] : "EN";
+
+  // A uint16_t mask, so it does not fit the uint8_t generic loop. Omitted while
+  // unconfigured, so the default keeps following the UI language.
+  if (keyboardLayouts != 0) {
+    doc["keyboardLayouts"] = keyboardLayouts;
+  }
 }
 
 bool CrossPointSettings::fromJson(JsonVariantConst doc) {
@@ -167,7 +173,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
       const uint8_t fieldDefault = s.*(info.valuePtr);  // struct-initializer default, read before we overwrite it
       uint8_t v = doc[info.key] | fieldDefault;
       if (info.type == SettingType::ENUM) {
-        v = clamp(v, (uint8_t)info.enumValues.size(), fieldDefault);
+        v = clamp(v, (uint8_t)info.enumLabels().size(), fieldDefault);
       } else if (info.type == SettingType::TOGGLE) {
         v = clamp(v, (uint8_t)2, fieldDefault);
       } else if (info.type == SettingType::VALUE) {
@@ -209,6 +215,50 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Font family — uses dynamic getter/setter in SettingsList so the generic loop skips it.
   const uint8_t storedFontFamily = doc["fontFamily"] | (uint8_t)0;
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
+  if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
+      !doc["longPressMenuFunction"].isNull()) {
+    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
+                                                  HomeButtonAction::Bookmark, HomeButtonAction::Dictionary,
+                                                  HomeButtonAction::ReaderMenu};
+    if (s.longPressMenuFunction < sizeof(LEGACY) / sizeof(LEGACY[0])) {
+      s.homeButtonLongPressAction = static_cast<uint8_t>(LEGACY[s.longPressMenuFunction]);
+      needsResave = true;
+    }
+  }
+
+  // Aurora releases before the upstream home-button trio stored the Home key as
+  // homeKeyShortAction / homeKeyLongAction (BUTTON_ACTION values). Carry the
+  // bindings over once; actions with no HomeButtonAction counterpart fall
+  // back to the new defaults.
+  if (BoardConfig::hasHomeKey()) {
+    static constexpr HomeButtonAction FROM_BUTTON_ACTION[] = {
+        HomeButtonAction::Ignore,            // BTN_ACT_NONE
+        HomeButtonAction::NextPage,          // BTN_ACT_PAGE_NEXT
+        HomeButtonAction::Ignore,            // BTN_ACT_PAGE_PREV
+        HomeButtonAction::Back,              // BTN_ACT_BACK
+        HomeButtonAction::Home,              // BTN_ACT_HOME
+        HomeButtonAction::ReaderMenu,        // BTN_ACT_READER_MENU
+        HomeButtonAction::ControlCenter,     // BTN_ACT_CONTROL_CENTER
+        HomeButtonAction::Ignore,            // BTN_ACT_NIGHT_MODE
+        HomeButtonAction::Refresh,           // BTN_ACT_REFRESH
+        HomeButtonAction::ToggleFrontlight,  // BTN_ACT_FRONTLIGHT
+        HomeButtonAction::Ignore,            // BTN_ACT_TOUCH_TOGGLE
+        HomeButtonAction::Ignore,            // BTN_ACT_SLEEP
+        HomeButtonAction::Ignore,            // BTN_ACT_POWER_OFF
+    };
+    static_assert(sizeof(FROM_BUTTON_ACTION) / sizeof(FROM_BUTTON_ACTION[0]) == BUTTON_ACTION_COUNT);
+    const auto migrate = [&](const char* legacyKey, const char* newKey, uint8_t& field) {
+      if (!doc[newKey].isNull() || doc[legacyKey].isNull()) return;
+      const uint8_t legacy = doc[legacyKey] | (uint8_t)BTN_ACT_NONE;
+      if (legacy >= BUTTON_ACTION_COUNT) return;
+      const HomeButtonAction mapped = FROM_BUTTON_ACTION[legacy];
+      if (mapped != HomeButtonAction::Ignore) field = static_cast<uint8_t>(mapped);
+      needsResave = true;
+    };
+    migrate("homeKeyShortAction", "homeButtonTapAction", s.homeButtonTapAction);
+    migrate("homeKeyLongAction", "homeButtonLongPressAction", s.homeButtonLongPressAction);
+  }
+
   // SD card font family name — not in SettingsList, load manually
   const char* sfn = doc["sdFontFamilyName"] | "";
   strncpy(sdFontFamilyName, sfn, sizeof(sdFontFamilyName) - 1);
@@ -229,6 +279,11 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   // Language -- stored as code string for stability across enum reorders.
   if (doc["language"].is<const char*>()) {
     language = static_cast<uint8_t>(I18n::languageFromCode(doc["language"].as<const char*>()));
+  }
+
+  // Absent means unconfigured, which is the default.
+  if (doc["keyboardLayouts"].is<uint16_t>()) {
+    keyboardLayouts = doc["keyboardLayouts"].as<uint16_t>();
   }
 
   if (needsResave) {
