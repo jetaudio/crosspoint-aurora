@@ -8,8 +8,9 @@ class HalFile;
 
 class SleepActivity final : public Activity {
  public:
-  explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false)
-      : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout) {}
+  explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false,
+                         bool powerOff = false)
+      : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout), powerOff(powerOff) {}
   void onEnter() override;
 
  private:
@@ -25,4 +26,8 @@ class SleepActivity final : public Activity {
   void renderBlankSleepScreen() const;
 
   bool fromTimeout = false;
+  // Ship mode (BTN_ACT_POWER_OFF): same screen sequence as sleep, but the
+  // popup and the default screen must not promise a wake the pack cannot give.
+  bool powerOff = false;
+  const char* enteringText() const;
 };

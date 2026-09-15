@@ -392,7 +392,7 @@ void enterDeepSleep(bool fromTimeout = false, const char* reason = "other", bool
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout);
+  activityManager.goToSleep(fromTimeout, powerOff);
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
