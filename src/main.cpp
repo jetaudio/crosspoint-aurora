@@ -2178,7 +2178,7 @@ void loop() {
     char why[24];
     snprintf(why, sizeof(why), "timeout-%lus", (millis() - lastActivityTime) / 1000UL);
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", millis() - lastActivityTime);
-    enterDeepSleep(true, why);
+    enterDeepSleep(true, why, SETTINGS.sleepTimeoutAction == CrossPointSettings::TIMEOUT_ACT_POWER_OFF);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }

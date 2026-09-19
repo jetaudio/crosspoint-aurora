@@ -187,9 +187,9 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
 // picks from this one list, so a new action is added in exactly two places:
 // the enum and here.
 inline std::vector<StrId> buttonActionValues() {
-  return {StrId::STR_ACTION_NONE,   StrId::STR_PAGE_NEXT,   StrId::STR_PAGE_PREV,      StrId::STR_ACTION_BACK,
-          StrId::STR_ACTION_HOME,   StrId::STR_READER_MENU, StrId::STR_CONTROL_CENTER, StrId::STR_NIGHT_MODE,
-          StrId::STR_FORCE_REFRESH, StrId::STR_FRONTLIGHT,  StrId::STR_TOUCH_TOGGLE,   StrId::STR_SLEEP,
+  return {StrId::STR_ACTION_NONE,     StrId::STR_PAGE_NEXT,   StrId::STR_PAGE_PREV,      StrId::STR_ACTION_BACK,
+          StrId::STR_ACTION_HOME,     StrId::STR_READER_MENU, StrId::STR_CONTROL_CENTER, StrId::STR_NIGHT_MODE,
+          StrId::STR_FORCE_REFRESH,   StrId::STR_FRONTLIGHT,  StrId::STR_TOUCH_TOGGLE,   StrId::STR_SLEEP,
           StrId::STR_ACTION_POWER_OFF};
 }
 
@@ -477,6 +477,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeoutMinutes,
             {CrossPointSettings::MIN_SLEEP_TIMEOUT_MINUTES, CrossPointSettings::MAX_SLEEP_TIMEOUT_MINUTES, 1},
             "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM),
+        // Filtered out below on boards whose charger cannot cut the pack.
+        SettingInfo::Enum(StrId::STR_TIMEOUT_ACTION, &CrossPointSettings::sleepTimeoutAction,
+                          {StrId::STR_SLEEP, StrId::STR_ACTION_POWER_OFF}, "sleepTimeoutAction", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_LIBRARY_USE_METADATA, &CrossPointSettings::libraryUseMetadata,
@@ -643,9 +646,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   // center tap is the primary path, so the setting stays at its Tap default.
   if (!BoardConfig::hasHomeKey()) {
     v.erase(std::remove_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) {
-                             return s.nameId == StrId::STR_SHOW_READER_MENU;
-                           }),
+                           [](const SettingInfo& s) { return s.nameId == StrId::STR_SHOW_READER_MENU; }),
             v.end());
   }
   // Every key whose action the user picks is listed in CONFIGURABLE_KEYS, so
@@ -689,6 +690,13 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   if (BoardConfig::ACTIVE.input.confirm < 0) {
     v.erase(
         std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_LONG_PRESS_MENU; }),
+        v.end());
+  }
+  // Power Off is the charger's ship mode. Without such a charger the timeout
+  // can only ever sleep, so there is nothing to choose between.
+  if (BoardConfig::ACTIVE.batteryGauge.chargerAddr == 0) {
+    v.erase(
+        std::remove_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_TIMEOUT_ACTION; }),
         v.end());
   }
   if (BoardConfig::hasHomeKey()) {

@@ -183,6 +183,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     BUTTON_ACTION_COUNT
   };
 
+  // What the auto-sleep timeout does once it expires. Power Off is the same
+  // ship mode as BTN_ACT_POWER_OFF, with the same fallback to deep sleep.
+  enum TIMEOUT_ACTION { TIMEOUT_ACT_SLEEP = 0, TIMEOUT_ACT_POWER_OFF = 1, TIMEOUT_ACTION_COUNT };
+
   // Short power button press actions. PAGE_TURN is the historical "page next";
   // PAGE_TURN_BACK extends it with "page previous" (appended to keep persisted
   // indices stable).
@@ -361,6 +365,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes). Legacy sleepTimeout enum values are migration-only.
   uint8_t sleepTimeoutMinutes = 10;
+  // Action taken when that timeout expires (TIMEOUT_ACTION).
+  uint8_t sleepTimeoutAction = TIMEOUT_ACT_SLEEP;
   // E-ink refresh frequency (default 15 pages)
   uint8_t refreshFrequency = REFRESH_15;
   uint8_t hyphenationEnabled = 0;

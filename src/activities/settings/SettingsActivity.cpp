@@ -5,15 +5,15 @@
 #include <HalDisplay.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
-#include <Utf8.h>
 #include <Memory.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 
-#include "BatteryMonitorActivity.h"
 #include "AboutActivity.h"
+#include "BatteryMonitorActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ConfigurableKeys.h"
@@ -449,6 +449,7 @@ bool SettingsActivity::isTopLevelSetting(StrId nameId) {
     case StrId::STR_HOME_BUTTON_TAP:
     case StrId::STR_WIFI_NETWORKS:
     case StrId::STR_TIME_TO_SLEEP:
+    case StrId::STR_TIMEOUT_ACTION:
     case StrId::STR_LANGUAGE:
     case StrId::STR_CHECK_UPDATES:
       return true;
@@ -489,8 +490,8 @@ void SettingsActivity::buildAuroraEntries() {
                                         StrId::STR_LINE_SPACING, StrId::STR_SCREEN_MARGIN, StrId::STR_PARA_ALIGNMENT});
     addSection(StrId::STR_CAT_DISPLAY, {StrId::STR_UI_THEME, StrId::STR_SLEEP_SCREEN, StrId::STR_REFRESH_FREQ,
                                         StrId::STR_SHOW_BUTTON_HINTS, StrId::STR_HOME_BUTTON_TAP});
-    addSection(StrId::STR_CAT_DEVICE,
-               {StrId::STR_WIFI_NETWORKS, StrId::STR_TIME_TO_SLEEP, StrId::STR_LANGUAGE, StrId::STR_CHECK_UPDATES});
+    addSection(StrId::STR_CAT_DEVICE, {StrId::STR_WIFI_NETWORKS, StrId::STR_TIME_TO_SLEEP, StrId::STR_TIMEOUT_ACTION,
+                                       StrId::STR_LANGUAGE, StrId::STR_CHECK_UPDATES});
     // Spacer header (no label) so the entry below sits in its own card.
     auroraEntries.push_back(AuroraEntry{true, StrId::STR_NONE_OPT, {}});
     // Everything else lives behind this entry.
