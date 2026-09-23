@@ -54,8 +54,11 @@ void HalStorage::prepareForDeepSleep() {
   SDCard.shutdown();
 }
 
-#if FREEINK_CAP_USB_MSC && !FREEINK_SD_SDMMC
-#error "USB Drive requires an SDMMC-backed storage profile"
+// SDMMC exposes its block device directly; an SPI card does too once SdFat is
+// built with USE_BLOCK_DEVICE_INTERFACE, which SDCardManager's build hook turns
+// on for every FREEINK_CAP_USB_MSC build.
+#if FREEINK_CAP_USB_MSC && !FREEINK_SD_SDMMC && !USE_BLOCK_DEVICE_INTERFACE
+#error "USB Drive needs an SDMMC card or SdFat's USE_BLOCK_DEVICE_INTERFACE"
 #endif
 
 bool HalStorage::beginUsbDrive() {
@@ -63,7 +66,7 @@ bool HalStorage::beginUsbDrive() {
   StorageLock lock;
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
-    LOG_ERR("USB", "USB Drive requires a mounted SDMMC filesystem");
+    LOG_ERR("USB", "USB Drive requires a mounted SD filesystem");
     return false;
   }
 
