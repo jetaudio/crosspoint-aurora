@@ -68,30 +68,51 @@ void HalClock::begin() {
   LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
 }
 
-bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
+namespace {
+// UTC calendar date -> Unix epoch, no timezone involvement (newlib has no
+// timegm). Days-from-civil per Howard Hinnant's algorithm.
+time_t epochFromUtc(const Rtc::DateTime& dt) {
+  int y = dt.year;
+  const int m = dt.month;
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = static_cast<unsigned>(y - era * 400);
+  const unsigned doy = (153u * static_cast<unsigned>(m + (m > 2 ? -3 : 9)) + 2u) / 5u + dt.day - 1u;
+  const unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+  const long days = static_cast<long>(era) * 146097L + static_cast<long>(doe) - 719468L;
+  return static_cast<time_t>(days) * 86400 + dt.hour * 3600L + dt.minute * 60L + dt.second;
+}
+}  // namespace
+
+void HalClock::setTimezone(const char* posixTz) {
+  setenv("TZ", posixTz && posixTz[0] != '\0' ? posixTz : "UTC0", 1);
+  tzset();
+  _lastPollMs = 0;  // re-derive local time under the new rule immediately
+}
+
+bool HalClock::localTime(struct tm& out) const {
   if (!_available) return false;
 
   const unsigned long now = millis();
-  if (_lastPollMs != 0 && (now - _lastPollMs) < CLOCK_POLL_MS) {
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
+  if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
+    Rtc::DateTime dt;
+    if (_sdkRtc.now(dt)) {
+      _cachedUtc = epochFromUtc(dt);
+      _hasCachedTime = true;
+    } else if (!_hasCachedTime) {
+      return false;
+    }
+    _lastPollMs = now != 0 ? now : 1;  // 0 doubles as the invalidation sentinel
   }
+  localtime_r(&_cachedUtc, &out);
+  return true;
+}
 
-  Rtc::DateTime dt;
-  if (!_sdkRtc.now(dt)) {
-    if (!_hasCachedTime) return false;
-    _lastPollMs = now;
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
-  }
-  _cachedHour = dt.hour;
-  _cachedMinute = dt.minute;
-  _lastPollMs = now;
-  _hasCachedTime = true;
-  hour = _cachedHour;
-  minute = _cachedMinute;
+bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
+  struct tm local;
+  if (!localTime(local)) return false;
+  hour = static_cast<uint8_t>(local.tm_hour);
+  minute = static_cast<uint8_t>(local.tm_min);
   return true;
 }
 
@@ -99,42 +120,24 @@ bool HalClock::epochSeconds(uint32_t& out) const {
   if (!_available) return false;
   Rtc::DateTime dt;
   if (!_sdkRtc.now(dt)) return false;
-  // Days from civil (Howard Hinnant): no mktime(), so no dependency on TZ.
-  const int y = static_cast<int>(dt.year) - (dt.month <= 2 ? 1 : 0);
-  const int era = (y >= 0 ? y : y - 399) / 400;
-  const unsigned yoe = static_cast<unsigned>(y - era * 400);
-  const unsigned mp = dt.month > 2 ? dt.month - 3u : dt.month + 9u;
-  const unsigned doy = (153 * mp + 2) / 5 + dt.day - 1;
-  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  const int64_t days = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
-  if (days < 0) return false;
-  out = static_cast<uint32_t>(days * 86400 + dt.hour * 3600 + dt.minute * 60 + dt.second);
+  const time_t epoch = epochFromUtc(dt);
+  if (epoch < 0) return false;
+  out = static_cast<uint32_t>(epoch);
   return true;
 }
 
-bool HalClock::formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased, bool use12Hour) const {
+bool HalClock::formatTime(char* buf, size_t bufSize, bool use12Hour) const {
   if (bufSize < (use12Hour ? 9u : 6u)) return false;
-  uint8_t h, m;
-  if (!getTime(h, m)) return false;
+  struct tm local;
+  if (!localTime(local)) return false;
 
-  // Apply UTC offset: convert biased value to signed quarter-hours.
-  // Clamp against corrupted persisted values so display time can't drift outside [-12:00, +14:00].
-  if (utcOffsetQuarterHoursBiased > 104) utcOffsetQuarterHoursBiased = 104;
-  int offsetQuarterHours = static_cast<int>(utcOffsetQuarterHoursBiased) - 48;
-  int totalMinutes = static_cast<int>(h) * 60 + static_cast<int>(m) + offsetQuarterHours * 15;
-
-  // Wrap around 24 hours
-  totalMinutes = ((totalMinutes % 1440) + 1440) % 1440;
-
-  const int hour24 = totalMinutes / 60;
-  const int min = totalMinutes % 60;
   if (use12Hour) {
-    const bool pm = hour24 >= 12;
-    int hour12 = hour24 % 12;
+    const bool pm = local.tm_hour >= 12;
+    int hour12 = local.tm_hour % 12;
     if (hour12 == 0) hour12 = 12;
-    snprintf(buf, bufSize, "%d:%02d %s", hour12, min, pm ? "PM" : "AM");
+    snprintf(buf, bufSize, "%d:%02d %s", hour12, local.tm_min, pm ? "PM" : "AM");
   } else {
-    snprintf(buf, bufSize, "%02d:%02d", hour24, min);
+    snprintf(buf, bufSize, "%02d:%02d", local.tm_hour, local.tm_min);
   }
   return true;
 }
@@ -150,10 +153,15 @@ bool HalClock::syncFromNTP() {
   LOG_INF("CLK", "Starting NTP sync...");
   // configTzTime() would set this and hand SNTP the hostnames; only the TZ half
   // is still wanted (the RTC is stored in UTC, and gmtime_r reads it back).
+  // Remember the display timezone so it can be restored below.
+  const char* tzBefore = getenv("TZ");
+  char savedTz[64] = {0};
+  if (tzBefore) snprintf(savedTz, sizeof(savedTz), "%s", tzBefore);
   setenv("TZ", "UTC0", 1);
   tzset();
   if (!startSntpWithResolvedServers()) {
     LOG_ERR("CLK", "No NTP server resolved, skipping sync");
+    setTimezone(savedTz);
     return false;
   }
   const SntpStopGuard sntpStopGuard;
@@ -174,20 +182,21 @@ bool HalClock::syncFromNTP() {
       dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
       dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
       dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);
-      if (_sdkRtc.set(dt)) {
-        _lastPollMs = 0;
-        _cachedHour = dt.hour;
-        _cachedMinute = dt.minute;
+      const bool ok = _sdkRtc.set(dt);
+      if (ok) {
+        _cachedUtc = epochFromUtc(dt);
         _hasCachedTime = true;
+        _lastPollMs = 0;
         LOG_INF("CLK", "RTC set to %04u-%02u-%02u %02u:%02u:%02u UTC", dt.year, dt.month, dt.day, dt.hour, dt.minute,
                 dt.second);
-        return true;
       }
-      return false;
+      setTimezone(savedTz);
+      return ok;
     }
     delay(100);
   }
 
   LOG_ERR("CLK", "NTP sync timed out");
+  setTimezone(savedTz);
   return false;
 }

@@ -18,11 +18,11 @@ enum class SettingAction {
   CustomiseStatusBar,
   CustomiseControlCenter,
   KeyActions,
+  ClockSettings,
   KOReaderSync,
   OPDSBrowser,
   Network,
   ClearCache,
-  RebuildLibraryIndex,
   CheckForUpdates,
   SdFirmwareUpdate,
   Language,
@@ -256,13 +256,15 @@ class SettingsActivity final : public UiTabListActivity {
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();
-  void rebuildLibraryIndex();
   void rebuildSettingsLists();
   void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
+
+  void drawChrome() override;
+  void drawFooter() override;
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool advanced = false);
   void onEnter() override;
   void onExit() override;
-  void render(RenderLock&&) override;
+  void render(RenderLock&& lock) override;
 };

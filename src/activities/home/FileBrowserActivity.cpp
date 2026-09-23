@@ -8,27 +8,81 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <functional>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
-#include "activities/util/ContextMenuActivity.h"
 #include "activities/util/HomeTabBar.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "util/BookmarkUtil.h"
 
 namespace fui = freeink::ui;
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
 constexpr size_t NAME_BUFFER_SIZE = 500;
+
+std::string getBookCachePath(const std::string& path) {
+  const char* prefix = nullptr;
+  if (FsHelpers::hasEpubExtension(path)) {
+    prefix = "epub_";
+  } else if (FsHelpers::hasXtcExtension(path)) {
+    prefix = "xtc_";
+  } else if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
+    prefix = "txt_";
+  } else {
+    return "";
+  }
+  return std::string("/.crosspoint/") + prefix + std::to_string(std::hash<std::string>{}(path));
+}
+
+bool moveStatePath(const std::string& oldPath, const std::string& newPath, bool& moved) {
+  moved = false;
+  if (oldPath.empty() || !Storage.exists(oldPath.c_str())) return true;
+  if (Storage.exists(newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Rename state target already exists: %s", newPath.c_str());
+    return false;
+  }
+  moved = Storage.rename(oldPath.c_str(), newPath.c_str());
+  if (!moved) LOG_ERR("FileBrowser", "Failed to move rename state: %s -> %s", oldPath.c_str(), newPath.c_str());
+  return moved;
+}
+
+void rollBackStatePath(const std::string& oldPath, const std::string& newPath, const bool moved) {
+  if (moved && !Storage.rename(newPath.c_str(), oldPath.c_str())) {
+    LOG_ERR("FileBrowser", "Failed to roll back rename state: %s -> %s", newPath.c_str(), oldPath.c_str());
+  }
+}
 }  // namespace
 
-std::string getFileName(std::string filename);
 std::string getFileExtension(const std::string& filename);
+
+void formatFileName(const std::string& filename, char* buffer, const size_t bufferSize) {
+  if (filename.empty()) {
+    buffer[0] = '\0';
+    return;
+  }
+  const bool isDirectory = filename.back() == '/';
+  const size_t dot = isDirectory ? filename.size() - 1 : filename.rfind('.');
+  const int length = static_cast<int>(dot == std::string::npos ? filename.size() : dot);
+  const char* format = isDirectory && !UITheme::getInstance().getTheme().showsFileIcons() ? "[%.*s]" : "%.*s";
+  snprintf(buffer, bufferSize, format, length, filename.c_str());
+  // Compose only the display copy; filesystem lookup needs the raw entry bytes.
+  utf8ComposeNfcInPlace(buffer);
+}
+
+void formatFileExtension(const std::string& filename, char* buffer, const size_t bufferSize) {
+  buffer[0] = '\0';
+  if (filename.empty() || filename.back() == '/') return;
+  if (const char* extension = strrchr(filename.c_str(), '.')) snprintf(buffer, bufferSize, "%s", extension);
+}
 
 FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                          std::string initialPath, const Mode mode)
@@ -38,10 +92,10 @@ FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManag
 
 void FileBrowserActivity::loadFiles() {
   files.clear();
+  prewarmedStart = -1;  // new folder contents: re-prewarm the visible window
 
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
-    rebuildRowItems();  // files is empty; also drops any now-stale cached rows
     return;
   }
 
@@ -50,9 +104,17 @@ void FileBrowserActivity::loadFiles() {
   if (!fileNameBuffer) {
     LOG_ERR("FileBrowser", "fileNameBuffer not allocated");
     root.close();
-    rebuildRowItems();
     return;
   }
+
+  // Size `files` once before the fill loop: doubling growth on a large folder
+  // holds the old and new string blocks live across the final realloc. The
+  // count-only pass reads no names, so filtered-out entries just over-reserve
+  // by a few slots.
+  size_t entryCount = 0;
+  for (auto file = root.openNextFile(); file; file = root.openNextFile()) ++entryCount;
+  root.rewindDirectory();
+  files.reserve(entryCount);
 
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
@@ -80,48 +142,64 @@ void FileBrowserActivity::loadFiles() {
   }
   root.close();
   FsHelpers::sortFileList(files);
-  rebuildRowItems();
 }
 
-// Derives rowNames/rowExtensions/rowItems from `files`. Called whenever
-// `files` changes (end of loadFiles()) so buildScreen() can reuse the cached
-// rows on every repaint instead of re-deriving a name/extension string (and a
-// ListItem) per file each time it's called.
-void FileBrowserActivity::rebuildRowItems() {
-  rowsUseFileIcons = UITheme::getInstance().getTheme().showsFileIcons();
-  rowNames.resize(files.size());
-  rowExtensions.resize(files.size());
-  rowItems.clear();
-  rowItems.reserve(files.size());
-  for (size_t i = 0; i < files.size(); i++) {
-    rowNames[i] = getFileName(files[i]);
-    rowExtensions[i] = getFileExtension(files[i]);
-    fui::ListItem item;
-    item.label = rowNames[i].c_str();
-    if (!rowExtensions[i].empty()) item.value = rowExtensions[i].c_str();
-    item.icon = listIconFor(UITheme::getFileIcon(files[i]));
-    item.actionValue = static_cast<int16_t>(i);
-    rowItems.push_back(item);
+// fui::ListProps::rowProvider — formats row `index` from files[index] into the
+// activity's scratch buffers on demand. Runs on the render task only for the
+// rows the list actually lays out, so nothing per-file is materialized beyond
+// `files` itself. The label/value pointers stay valid until the next call,
+// which is all the provider contract requires. The "[folder]" format is
+// theme-dependent, but it's re-derived here on every
+// repaint, so a theme change picked up while this activity was paused
+// underneath another screen needs no cache invalidation.
+void FileBrowserActivity::provideRow(void* ctx, const uint16_t index, fui::ListItem& item) {
+  auto* self = static_cast<FileBrowserActivity*>(ctx);
+  if (index >= self->files.size()) return;
+  const std::string& entry = self->files[index];
+  formatFileName(entry, self->rowNameBuf, sizeof(self->rowNameBuf));
+  item.label = self->rowNameBuf;
+  formatFileExtension(entry, self->rowExtBuf, sizeof(self->rowExtBuf));
+  if (self->rowExtBuf[0] != '\0') {
+    item.value = self->rowExtBuf;
   }
+  item.icon = listIconFor(UITheme::getFileIcon(entry));
+  item.actionValue = static_cast<int16_t>(index);
+}
 
-  // One SD pass for every CJK filename in the folder; repaints then hit the
-  // resident tables instead of re-reading per-string. Getter form: no
-  // concatenated copy (a bare-new string append aborts under heap pressure).
-  // The last index covers the bottom path band: basepath (possibly a CJK
-  // folder name) draws in the same small font, so it must live in the same
-  // batch or it would evict the rows' glyphs when the heap gate disables
-  // union merging. (prewarmFallbackText appends the truncation ellipsis.)
+// Batch-prewarm the CJK fallback glyphs for a bounded window of display names
+// starting at the viewport top — one SD pass per list page (the reader TOC's
+// refreshTocWindow pattern) instead of one unbounded pass over the whole
+// folder. Getter form: no concatenated copy (a bare-new string append aborts
+// under heap pressure). The last index covers the bottom path band: basepath
+// (possibly a CJK folder name) draws in the same small font, so it must live
+// in the same batch or it would evict the rows' glyphs when the heap gate
+// disables union merging. (prewarmFallbackText appends the truncation
+// ellipsis.)
+void FileBrowserActivity::prewarmRowGlyphs(const int start) {
+  const int total = static_cast<int>(files.size());
+  int clamped = start;
+  if (clamped > total - PREWARM_WINDOW) clamped = total - PREWARM_WINDOW;
+  if (clamped < 0) clamped = 0;
+  if (clamped == prewarmedStart) return;
+  prewarmedStart = clamped;
+  const int count = total - clamped < PREWARM_WINDOW ? total - clamped : PREWARM_WINDOW;
+
   struct PrewarmCtx {
-    const std::vector<std::string>* names;
-    const std::string* path;
-  } prewarmCtx{&rowNames, &basepath};
+    FileBrowserActivity* self;
+    int first;
+    int count;
+  } prewarmCtx{this, clamped, count};
   renderer.prewarmFallbackText(
       uiScaleSpec().smallFontId,
       [](const void* ctx, uint32_t i) -> const char* {
-        const auto* c = static_cast<const PrewarmCtx*>(ctx);
-        return i < c->names->size() ? (*c->names)[i].c_str() : c->path->c_str();
+        auto* c = const_cast<PrewarmCtx*>(static_cast<const PrewarmCtx*>(ctx));
+        if (i < static_cast<uint32_t>(c->count)) {
+          formatFileName(c->self->files[c->first + i], c->self->rowNameBuf, sizeof(c->self->rowNameBuf));
+          return c->self->rowNameBuf;
+        }
+        return c->self->basepath.c_str();
       },
-      &prewarmCtx, static_cast<uint32_t>(rowNames.size()) + 1);
+      &prewarmCtx, static_cast<uint32_t>(count) + 1);
 }
 
 void FileBrowserActivity::onEnter() {
@@ -162,9 +240,6 @@ void FileBrowserActivity::onEnter() {
 void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
-  rowNames.clear();
-  rowExtensions.clear();
-  rowItems.clear();
   fileNameBuffer.reset();
 }
 
@@ -249,130 +324,6 @@ bool FileBrowserActivity::removeDirFile(const std::string& fullPath) {
   return true;
 }
 
-// Open the long-press context menu for `entry` as an overlay. Rename opens a keyboard prefilled
-// with the current name; Delete opens a confirmation dialog before anything is removed.
-void FileBrowserActivity::showContextMenu(const std::string& entry) {
-  std::string directory = basepath;
-  if (directory.back() != '/') directory += "/";
-
-  // Name without the trailing slash directories carry in the list, and whether it is a directory.
-  const bool isDir = !entry.empty() && entry.back() == '/';
-  std::string name = entry;
-  if (isDir) name.pop_back();
-
-  const std::string fullPath = directory + name;
-
-  auto menuHandler = [this, directory, name, fullPath, isDir](const ActivityResult& res) {
-    if (res.isCancelled) return;
-    const auto* menu = std::get_if<MenuResult>(&res.data);
-    if (!menu) return;
-    switch (static_cast<ContextAction>(menu->action)) {
-      case ContextAction::Rename:
-        promptRename(directory, name, isDir);
-        break;
-      case ContextAction::Delete:
-        confirmAndDelete(fullPath, name);
-        break;
-    }
-  };
-
-  std::vector<ContextMenuActivity::Item> items = {
-      {StrId::STR_RENAME, static_cast<int>(ContextAction::Rename)},
-      {StrId::STR_DELETE, static_cast<int>(ContextAction::Delete)},
-  };
-  startActivityForResult(std::make_unique<ContextMenuActivity>(renderer, mappedInput, name, std::move(items)),
-                         menuHandler);
-}
-
-// Show the on-screen keyboard prefilled with the editable part of the name; on confirm, rename the
-// entry in the same directory and refresh the list (keeping the selection on the renamed entry).
-// Only the base name is editable — the extension is preserved (directories have no extension).
-void FileBrowserActivity::promptRename(const std::string& directory, const std::string& currentName, bool isDir) {
-  // Split off the extension so the user only edits the base name. A leading dot (hidden file) is
-  // not treated as an extension separator.
-  std::string base = currentName;
-  std::string ext;
-  if (!isDir) {
-    const auto dot = currentName.rfind('.');
-    if (dot != std::string::npos && dot != 0) {
-      base = currentName.substr(0, dot);
-      ext = currentName.substr(dot);
-    }
-  }
-
-  auto handler = [this, directory, currentName, base, ext, isDir](const ActivityResult& res) {
-    if (res.isCancelled) return;
-    const auto* kb = std::get_if<KeyboardResult>(&res.data);
-    if (!kb) return;
-    const std::string newBase = kb->text;
-    if (newBase.empty() || newBase == base) return;
-
-    const std::string newName = newBase + ext;
-    const std::string oldPath = directory + currentName;
-    const std::string newPath = directory + newName;
-    // The book cache is keyed by a hash of the file path, so a rename orphans it; clear the old
-    // entry's cache first (a no-op for non-book files) so it doesn't linger.
-    clearBookCache(oldPath);
-    if (Storage.rename(oldPath.c_str(), newPath.c_str())) {
-      LOG_DBG("FileBrowser", "Renamed: %s -> %s", oldPath.c_str(), newPath.c_str());
-      {
-        // buildScreen() reads the row caches on the render task; see activateSelected().
-        RenderLock lock(*this);
-        loadFiles();
-        nav.selected = static_cast<int>(findEntry(isDir ? newName + "/" : newName));
-        nav.follow(listCount());
-      }
-      requestUpdate(true);
-    } else {
-      LOG_ERR("FileBrowser", "Rename failed: %s -> %s", oldPath.c_str(), newPath.c_str());
-    }
-  };
-
-  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), base,
-                                                                 /*maxLength=*/0, InputType::Text),
-                         handler);
-}
-
-// Show the delete-confirmation overlay and, if confirmed, remove the file/directory.
-void FileBrowserActivity::confirmAndDelete(const std::string& fullPath, const std::string& displayName) {
-  // The context menu has just closed; repaint the file list so its box doesn't bleed through
-  // under the confirmation overlay (both share the framebuffer).
-  requestUpdateAndWait();
-
-  auto handler = [this, fullPath](const ActivityResult& res) {
-    if (res.isCancelled) {
-      LOG_DBG("FileBrowser", "Delete cancelled by user");
-      return;
-    }
-    // Repaint the file list now so the confirmation dialog disappears immediately, before the
-    // delete (clearing a book's cache can take a moment and would otherwise leave it on screen).
-    requestUpdateAndWait();
-    LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
-    if (removeDirFile(fullPath)) {
-      LOG_DBG("FileBrowser", "Deleted successfully");
-      {
-        // buildScreen() reads the row caches on the render task; see activateSelected().
-        RenderLock lock(*this);
-        loadFiles();
-        if (files.empty()) {
-          nav.selected = 0;
-        } else if (nav.selected >= listCount()) {
-          // Move selection to the new "last" item
-          nav.selected = listCount() - 1;
-        }
-        nav.follow(listCount());
-      }
-      requestUpdate(true);
-    } else {
-      LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
-    }
-  };
-
-  std::string heading = tr(STR_DELETE) + std::string("? ");
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, displayName), handler);
-}
-
 void FileBrowserActivity::activateIndex(const int index) {
   (void)index;  // base already synced nav.selected to the tapped row
   // Activation navigates or opens; a lingering flash would gray an unrelated
@@ -383,11 +334,12 @@ void FileBrowserActivity::activateIndex(const int index) {
 
 void FileBrowserActivity::onRowLongPress(const int index) {
   (void)index;  // base already synced nav.selected to the pressed row
-  // The menu draws over this screen; a lingering flash would gray a row under it.
   app.clearTapFlash();
-  if (mode != Mode::Books || files.empty()) return;
-  if (nav.selected < 0 || nav.selected >= listCount()) return;
-  showContextMenu(files[nav.selected]);
+  if (mode == Mode::Books) {
+    showEntryActions();
+  } else {
+    activateSelected();
+  }
 }
 
 void FileBrowserActivity::activateSelected() {
@@ -410,30 +362,162 @@ void FileBrowserActivity::activateSelected() {
     return;
   }
 
-  {
-    // --- OPEN / NAVIGATE ---
-    // Deleting and renaming live in the long-press context menu (showContextMenu),
-    // so a plain activation only ever opens a file or descends into a folder.
-    // buildScreen() runs on the render task and reads basepath plus the
-    // ListItem label/value pointers into rowNames/rowExtensions that
-    // rebuildRowItems() frees; mutate only under the render lock.
-    RenderLock lock(*this);
-    if (basepath.back() != '/') basepath += "/";
+  // buildScreen() runs on the render task and reads basepath plus `files`
+  // through the row provider; mutate only under the render lock.
+  RenderLock lock(*this);
+  if (basepath.back() != '/') basepath += "/";
 
-    if (isDirectory) {
-      basepath += entry.substr(0, entry.length() - 1);
-      loadFiles();
-      nav.selected = 0;
-      nav.top = 0;
-      lock.unlock();
-      requestUpdate();
-    } else {
-      const std::string fullPath = basepath + entry;
-      lock.unlock();  // onSelectBook launches an activity; don't hold the lock across it
-      onSelectBook(fullPath);
-    }
+  if (isDirectory) {
+    basepath += entry.substr(0, entry.length() - 1);
+    loadFiles();
+    nav.selected = 0;
+    nav.top = 0;
+    lock.unlock();
+    requestUpdate();
+  } else {
+    const std::string fullPath = basepath + entry;
+    lock.unlock();  // onSelectBook launches an activity; don't hold the lock across it
+    onSelectBook(fullPath);
   }
-  return;
+}
+
+void FileBrowserActivity::showEntryActions() {
+  if (mode != Mode::Books || files.empty() || optionPopup.isActive() || nav.selected < 0 ||
+      nav.selected >= listCount()) {
+    return;
+  }
+
+  const bool isDirectory = files[nav.selected].back() == '/';
+  static constexpr StrId FILE_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME};
+  static constexpr StrId DIRECTORY_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE};
+  optionPopup.show(StrId::STR_FILENAME, isDirectory ? DIRECTORY_OPTIONS : FILE_OPTIONS, isDirectory ? 2 : 3, 0,
+                   [this](const int index) {
+                     if (index == 0) {
+                       activateSelected();
+                     } else if (index == 1) {
+                       deleteSelected();
+                     } else if (index == 2) {
+                       startRename();
+                     }
+                   });
+  requestUpdate();
+}
+
+void FileBrowserActivity::deleteSelected() {
+  if (files.empty() || nav.selected < 0 || nav.selected >= listCount()) return;
+
+  std::string cleanBasePath = basepath;
+  if (cleanBasePath.back() != '/') cleanBasePath += "/";
+  const std::string entry = files[nav.selected];
+  const std::string fullPath = cleanBasePath + entry;
+
+  auto handler = [this, fullPath](const ActivityResult& res) {
+    if (res.isCancelled) {
+      LOG_DBG("FileBrowser", "Delete cancelled by user");
+      return;
+    }
+
+    LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
+    if (!removeDirFile(fullPath)) {
+      LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
+      return;
+    }
+
+    LOG_DBG("FileBrowser", "Deleted successfully");
+    {
+      RenderLock lock(*this);
+      loadFiles();
+      if (files.empty()) {
+        nav.selected = 0;
+      } else if (nav.selected >= listCount()) {
+        nav.selected = listCount() - 1;
+      }
+      nav.follow(listCount());
+    }
+    requestUpdate(true);
+  };
+
+  const std::string heading = tr(STR_DELETE) + std::string("? ");
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, heading, utf8ComposeNfc(entry));
+  if (!confirmation) {
+    LOG_ERR("FileBrowser", "OOM: delete confirmation");
+    return;
+  }
+  startActivityForResult(std::move(confirmation), std::move(handler));
+}
+
+void FileBrowserActivity::startRename() {
+  if (files.empty() || nav.selected < 0 || nav.selected >= listCount()) return;
+
+  const std::string oldEntry = files[nav.selected];
+  if (oldEntry.back() == '/') return;
+
+  std::string cleanBasePath = basepath;
+  if (cleanBasePath.back() != '/') cleanBasePath += "/";
+  const std::string oldPath = cleanBasePath + oldEntry;
+  const std::string extension = getFileExtension(oldEntry);
+  const std::string initialStem = utf8ComposeNfc(oldEntry.substr(0, oldEntry.size() - extension.size()));
+  const size_t maxStemLength = NAME_BUFFER_SIZE - extension.size() - 1;
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), initialStem,
+                                                           maxStemLength, InputType::Text);
+  if (!keyboard) {
+    LOG_ERR("FileBrowser", "OOM: rename keyboard");
+    return;
+  }
+  startActivityForResult(std::move(keyboard), [this, oldPath, oldEntry, extension](const ActivityResult& result) {
+    if (result.isCancelled) return;
+    renameSelectedFile(oldPath, oldEntry, std::get<KeyboardResult>(result.data).text, extension);
+  });
+}
+
+void FileBrowserActivity::renameSelectedFile(const std::string& oldPath, const std::string& oldEntry,
+                                             const std::string& newStem, const std::string& extension) {
+  const std::string newEntry = newStem + extension;
+  if (newStem.empty() || newEntry.size() >= NAME_BUFFER_SIZE || !FsHelpers::isSafePathComponent(newEntry)) {
+    LOG_ERR("FileBrowser", "Invalid rename target: %s", newEntry.c_str());
+    return;
+  }
+  if (newEntry == utf8ComposeNfc(oldEntry)) return;
+
+  const std::string parentPath = FsHelpers::extractFolderPath(oldPath);
+  const std::string newPath = (parentPath == "/" ? parentPath : parentPath + "/") + newEntry;
+  if (Storage.exists(newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Rename target already exists: %s", newPath.c_str());
+    return;
+  }
+
+  const std::string oldCachePath = getBookCachePath(oldPath);
+  const std::string newCachePath = getBookCachePath(newPath);
+  const bool isEpub = FsHelpers::hasEpubExtension(oldPath);
+  const std::string oldBookmarkPath = isEpub ? BookmarkUtil::getBookmarkPath(oldPath) : "";
+  const std::string newBookmarkPath = isEpub ? BookmarkUtil::getBookmarkPath(newPath) : "";
+  bool cacheMoved = false;
+  bool bookmarksMoved = false;
+  if (!moveStatePath(oldCachePath, newCachePath, cacheMoved)) return;
+  if (!moveStatePath(oldBookmarkPath, newBookmarkPath, bookmarksMoved)) {
+    rollBackStatePath(oldCachePath, newCachePath, cacheMoved);
+    return;
+  }
+  if (!Storage.rename(oldPath.c_str(), newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Failed to rename file: %s -> %s", oldPath.c_str(), newPath.c_str());
+    rollBackStatePath(oldBookmarkPath, newBookmarkPath, bookmarksMoved);
+    rollBackStatePath(oldCachePath, newCachePath, cacheMoved);
+    return;
+  }
+
+  RECENT_BOOKS.updatePath(oldPath, newPath, oldCachePath, newCachePath);
+  if (APP_STATE.openEpubPath == oldPath) {
+    APP_STATE.openEpubPath = newPath;
+    if (!APP_STATE.saveToFile()) LOG_ERR("FileBrowser", "Failed to save renamed open-book path");
+  }
+
+  {
+    RenderLock lock(*this);
+    loadFiles();
+    nav.selected = static_cast<int>(findEntry(newEntry));
+    nav.follow(listCount());
+  }
+  requestUpdate(true);
 }
 
 // Tab mode reserves the front Left/Right pair for the bottom bar, so only the side
@@ -454,6 +538,8 @@ void FileBrowserActivity::navigateButtons() {
 }
 
 bool FileBrowserActivity::handleCustomInput() {
+  if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
+
   // Aurora "Browse" tab: front Left/Right walk the bottom bar (the side Up/Down pair
   // keeps the list). Not in the firmware picker, a pushed sub-activity with no tab bar.
   if (mode == Mode::Books && GUI.ownsHomeLayout() && HomeTabBar::handleLeftRight(mappedInput, HomeTabBar::Browse)) {
@@ -461,20 +547,6 @@ bool FileBrowserActivity::handleCustomInput() {
   }
   if (mode == Mode::Books && GUI.ownsHomeLayout() && HomeTabBar::handleTap(mappedInput, renderer, HomeTabBar::Browse)) {
     return true;
-  }
-
-  // Long press Confirm opens the context menu the moment the 1s threshold is reached, while
-  // the button is still held (no need to release first). `contextMenuArmed` fires it once per
-  // hold and resets whenever Confirm is up, so a later short press still opens normally.
-  if (mode == Mode::Books && mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
-    if (!contextMenuArmed && !lockNextConfirmRelease && !files.empty() && mappedInput.getHeldTime() >= GO_HOME_MS &&
-        nav.selected >= 0 && nav.selected < listCount()) {
-      contextMenuArmed = true;
-      showContextMenu(files[nav.selected]);
-      return true;
-    }
-  } else {
-    contextMenuArmed = false;
   }
 
   // A Back carried in from the previous screen (see onEnter) owns its own release.
@@ -490,8 +562,8 @@ bool FileBrowserActivity::handleCustomInput() {
   if (mode == Mode::Books && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       !mappedInput.wasSyntheticBack() && mappedInput.getHeldTime() >= GO_HOME_MS && basepath != "/") {
     {
-      // buildScreen() runs on the render task and reads basepath plus the
-      // row caches rebuildRowItems() frees; mutate only under the render lock.
+      // buildScreen() runs on the render task and reads basepath plus `files`
+      // through the row provider; mutate only under the render lock.
       RenderLock lock(*this);
       basepath = "/";
       loadFiles();
@@ -506,11 +578,20 @@ bool FileBrowserActivity::handleCustomInput() {
 }
 
 bool FileBrowserActivity::handleButtons() {
+  // A Confirm carried in from the previous screen (see onEnter) owns its own
+  // release, long or short.
+  if (lockNextConfirmRelease && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    lockNextConfirmRelease = false;
+    return true;
+  }
+
+  if (mode == Mode::Books && mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, GO_HOME_MS)) {
+    app.clearTapFlash();
+    showEntryActions();
+    return true;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (lockNextConfirmRelease) {
-      lockNextConfirmRelease = false;
-      return true;
-    }
     activateSelected();
     return true;
   }
@@ -523,8 +604,8 @@ bool FileBrowserActivity::handleButtons() {
         const std::string oldPath = basepath;
 
         {
-          // buildScreen() runs on the render task and reads basepath plus the
-          // row caches rebuildRowItems() frees; mutate only under the render lock.
+          // buildScreen() runs on the render task and reads basepath plus `files`
+          // through the row provider; mutate only under the render lock.
           RenderLock lock(*this);
           basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
           if (basepath.empty()) basepath = "/";
@@ -554,21 +635,9 @@ bool FileBrowserActivity::handleButtons() {
   return false;
 }
 
-std::string getFileName(std::string filename) {
-  // Display copy only — `files[]` keeps the raw directory-entry bytes, because
-  // FAT long-filename lookup is byte-exact: an NFC-normalized path would fail
-  // to open the NFD entry macOS wrote. Composing here fixes rendering (fonts
-  // carry precomposed syllables / letters only) without touching paths.
-  filename = utf8ComposeNfc(filename);
-  if (filename.back() == '/') {
-    filename.pop_back();
-    if (!UITheme::getInstance().getTheme().showsFileIcons()) {
-      return "[" + filename + "]";
-    }
-    return filename;
-  }
-  const auto pos = filename.rfind('.');
-  return filename.substr(0, pos);
+void FileBrowserActivity::render(RenderLock&& lock) {
+  if (optionPopup.processRender(renderer, mappedInput)) return;
+  UiListActivity::render(std::move(lock));
 }
 
 std::string getFileExtension(const std::string& filename) {
@@ -627,19 +696,12 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
     return;
   }
 
-  // rowNames/rowExtensions/rowItems are built once per loadFiles() call (see
-  // rebuildRowItems()) and reused here. getFileName()'s folder-bracket format
-  // depends on the theme, so a theme change picked up while this activity was
-  // paused underneath another screen invalidates the cache before it's read.
-  if (rowsUseFileIcons != UITheme::getInstance().getTheme().showsFileIcons()) {
-    rebuildRowItems();
-  }
-
   fui::ListProps props;
-  props.items = rowItems.data();
-  props.count = static_cast<uint16_t>(rowItems.size());
+  props.rowProvider = &FileBrowserActivity::provideRow;
+  props.rowProviderCtx = this;
+  props.count = static_cast<uint16_t>(files.size());
   props.action = ACTION_ROW;
-  // Tap opens/navigates; long-press prompts delete (physical buttons stay in loop()).
+  // Tap opens/navigates; long-press shows entry actions (physical buttons stay in loop()).
   props.inputMask = fui::InputTouch | fui::InputLongPress;
   props.valueInset = 8;  // air between the extension and the row edge
   // Names use up to two small-font lines; shared list layout sizes each row.
@@ -651,6 +713,10 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   // 60%-band wrap cap and let both name lines run the full width before it.
   props.balanceWrappedLabelWithValue = false;
   syncListViewport(screen, props);
+  // Prewarm the window at the final viewport (syncListViewport just applied
+  // follow/clamping to nav.top) before the list resolves rows through the
+  // provider.
+  prewarmRowGlyphs(nav.top);
   screen.list(props);
 }
 

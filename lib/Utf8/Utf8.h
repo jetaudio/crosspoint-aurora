@@ -31,6 +31,10 @@ uint32_t utf8ToUpperCodepoint(uint32_t cp);
 // Returns an uppercased copy of a UTF-8 string using utf8ToUpperCodepoint per
 // codepoint. Bytes that do not start a valid codepoint are preserved as-is.
 std::string utf8ToUpper(const std::string& in);
+// Compose a null-terminated display buffer without allocating or growing it.
+// Uncomposed bytes (including malformed UTF-8) are preserved unchanged.
+void utf8ComposeNfcInPlace(char* buffer);
+
 // The base letter a precomposed codepoint decomposes to, or 0 when there is
 // none ("é" -> "e", but "ø" -> 0: it is a letter in its own right, not
 // o-with-stroke). Lives here rather than in a caller because the compose table

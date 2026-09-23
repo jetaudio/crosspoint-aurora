@@ -110,7 +110,7 @@ int AuroraTheme::drawHeaderBar(const GfxRenderer& renderer, int x, int top, int 
   char timeBuf[9] = {0};
   int clockW = 0;
   if (SETTINGS.statusBarClock && halClock.isAvailable() &&
-      halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
+      halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockFormat == 1)) {
     clockW = renderer.getTextWidth(kCaptionFontId, timeBuf);
   }
   const int clockX = x + (width - clockW) / 2;
