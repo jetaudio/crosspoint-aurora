@@ -19,6 +19,7 @@
 #include <esp_system.h>
 #include <sys/time.h>
 
+#include <cstddef>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -57,9 +58,14 @@ RTC_NOINIT_ATTR uint32_t logDeepSleepMs;
 // Since-last-charge accumulators. Same facts as above, different anchor: these
 // reset every time external power shows up, which is the span a reader actually
 // asks about ("what has this cost me since I unplugged it?").
-#define BATTERY_USE_MAGIC 0x42555331u  // 'BUS1'
+//
+// Elapsed time is a counter rather than an anchor on the wall clock: after a
+// power cut gettimeofday() restarts near 1970, and an NTP sync later steps it
+// forward by decades, so "now minus anchor" is only meaningful within one
+// uninterrupted boot-and-sleep chain.
+#define BATTERY_USE_MAGIC 0x42555332u  // 'BUS2'
 RTC_NOINIT_ATTR uint32_t useMagic;
-RTC_NOINIT_ATTR uint64_t useAnchorUs;
+RTC_NOINIT_ATTR uint64_t useElapsedMs;
 RTC_NOINIT_ATTR uint16_t useStartRemCap;
 RTC_NOINIT_ATTR uint32_t useRunMs;
 RTC_NOINIT_ATTR uint32_t useLightSleepMs;
@@ -69,6 +75,37 @@ RTC_NOINIT_ATTR uint32_t useWifiMs;
 RTC_NOINIT_ATTR uint32_t useFrontlightPctMs;
 RTC_NOINIT_ATTR uint32_t useRefreshes;
 RTC_NOINIT_ATTR uint32_t usePageTurns;
+
+// RTC_NOINIT survives deep sleep but not a power cut (Power Off's ship mode, a
+// flat or unplugged pack), so the since-charge counters are also mirrored to the
+// card and restored from there when a cold boot finds RTC memory empty.
+constexpr const char* USAGE_PATH = "/.crosspoint/battery-usage.bin";
+constexpr uint32_t USAGE_FILE_MAGIC = 0x46535542u;  // 'BUSF'
+constexpr uint32_t USAGE_FILE_VERSION = 1;
+// The gauge reads ~1 mAh noisy and recalibrates after a pack is reconnected. A
+// reading this far ABOVE what was saved means the pack was charged (or swapped)
+// while the device was off, so the old span no longer describes this charge.
+constexpr uint16_t USAGE_RESTORE_CHARGE_TOLERANCE_MAH = 20;
+// A gap longer than this between save and restore is treated as an RTC glitch.
+constexpr uint32_t USAGE_MAX_OFF_GAP_S = 60UL * 24UL * 60UL * 60UL;
+
+struct UsageSnapshot {
+  uint32_t magic;
+  uint32_t version;
+  uint16_t startRemCap;
+  uint16_t savedRemCap;  // gauge reading at save time; 0 = unread
+  uint32_t rtcEpoch;     // RTC seconds at save time; 0 = no trustworthy RTC
+  uint64_t elapsedMs;
+  uint32_t runMs;
+  uint32_t lightSleepMs;
+  uint32_t deepSleepMs;
+  uint32_t highClockMs;
+  uint32_t wifiMs;
+  uint32_t frontlightPctMs;
+  uint32_t refreshes;
+  uint32_t pageTurns;
+  uint32_t checksum;  // over every byte before this field
+};
 
 unsigned long lastSampleMs = 0;
 unsigned long lastRowMs = 0;
@@ -125,7 +162,7 @@ void anchorUsage() {
   uint16_t remCap = 0;
   readGauge16(0x10, remCap);
   useMagic = BATTERY_USE_MAGIC;
-  useAnchorUs = wallUs();
+  useElapsedMs = 0;
   useStartRemCap = remCap;
   useRunMs = 0;
   useLightSleepMs = 0;
@@ -161,12 +198,98 @@ void accumulate() {
   if (highClock) logHighClockMs += dt;
 
   useRunMs += dt;
+  useElapsedMs += dt;
   if (wifiUp) useWifiMs += dt;
   if (highClock) useHighClockMs += dt;
   // Brightness-weighted, because the frontlight is the one load whose cost
   // scales with a setting rather than with being on: 1% and 100% differ by two
   // orders of magnitude, and "hours the light was on" cannot tell them apart.
   if (frontlightOn) useFrontlightPctMs += dt * Frontlight.brightness();
+}
+
+uint32_t snapshotChecksum(const UsageSnapshot& snap) {
+  // FNV-1a: enough to reject a torn or foreign file, and needs no table.
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&snap);
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < offsetof(UsageSnapshot, checksum); i++) {
+    h ^= bytes[i];
+    h *= 16777619u;
+  }
+  return h;
+}
+
+// Mirror the since-charge counters to the card. Called on the row cadence and
+// on the way into sleep / power off, so a sudden power cut loses at most one
+// row interval of accounting.
+void saveUsage() {
+  if (useMagic != BATTERY_USE_MAGIC || !Storage.ready()) return;
+  UsageSnapshot snap{};
+  snap.magic = USAGE_FILE_MAGIC;
+  snap.version = USAGE_FILE_VERSION;
+  snap.startRemCap = useStartRemCap;
+  readGauge16(0x10, snap.savedRemCap);
+  if (!halClock.epochSeconds(snap.rtcEpoch)) snap.rtcEpoch = 0;
+  snap.elapsedMs = useElapsedMs;
+  snap.runMs = useRunMs;
+  snap.lightSleepMs = useLightSleepMs;
+  snap.deepSleepMs = useDeepSleepMs;
+  snap.highClockMs = useHighClockMs;
+  snap.wifiMs = useWifiMs;
+  snap.frontlightPctMs = useFrontlightPctMs;
+  snap.refreshes = useRefreshes;
+  snap.pageTurns = usePageTurns;
+  snap.checksum = snapshotChecksum(snap);
+
+  HalFile file;
+  if (!Storage.openFileForWrite("BATTLOG", USAGE_PATH, file)) return;
+  file.write(reinterpret_cast<const uint8_t*>(&snap), sizeof(snap));
+  file.flush();
+  file.close();
+}
+
+// Cold boot with RTC memory gone: pick the span back up from the card, unless
+// the pack has visibly been charged since it was written.
+bool restoreUsage() {
+  if (!Storage.ready() || !Storage.exists(USAGE_PATH)) return false;
+  UsageSnapshot snap{};
+  HalFile file = Storage.open(USAGE_PATH, O_RDONLY);
+  if (!file) return false;
+  const int got = file.read(reinterpret_cast<uint8_t*>(&snap), sizeof(snap));
+  file.close();
+  if (got != static_cast<int>(sizeof(snap)) || snap.magic != USAGE_FILE_MAGIC ||
+      snap.version != USAGE_FILE_VERSION || snap.checksum != snapshotChecksum(snap)) {
+    return false;
+  }
+
+  uint16_t remCap = 0;
+  if (!readGauge16(0x10, remCap) || remCap == 0) return false;
+  if (snap.savedRemCap != 0 && remCap > snap.savedRemCap + USAGE_RESTORE_CHARGE_TOLERANCE_MAH) {
+    LOG_DBG("BATTLOG", "Pack gained charge while off (%u -> %u mAh); new span", snap.savedRemCap, remCap);
+    return false;
+  }
+
+  // The time spent switched off still belongs to the span. Only the RTC can
+  // say how long that was; without it the gap is simply not counted.
+  uint64_t offMs = 0;
+  uint32_t nowEpoch = 0;
+  if (snap.rtcEpoch != 0 && halClock.epochSeconds(nowEpoch) && nowEpoch >= snap.rtcEpoch &&
+      nowEpoch - snap.rtcEpoch < USAGE_MAX_OFF_GAP_S) {
+    offMs = static_cast<uint64_t>(nowEpoch - snap.rtcEpoch) * 1000ULL;
+  }
+
+  useMagic = BATTERY_USE_MAGIC;
+  useStartRemCap = snap.startRemCap;
+  useElapsedMs = snap.elapsedMs + offMs;
+  useRunMs = snap.runMs;
+  useLightSleepMs = snap.lightSleepMs;
+  useDeepSleepMs = snap.deepSleepMs;
+  useHighClockMs = snap.highClockMs;
+  useWifiMs = snap.wifiMs;
+  useFrontlightPctMs = snap.frontlightPctMs;
+  useRefreshes = snap.refreshes;
+  usePageTurns = snap.pageTurns;
+  LOG_INF("BATTLOG", "Since-charge usage restored from card (off %lus)", static_cast<unsigned long>(offMs / 1000ULL));
+  return true;
 }
 
 // True when the log on the card already carries today's columns (or there is
@@ -313,7 +436,10 @@ void begin() {
         const uint32_t stall = freeink::PowerManager::sleepReport().releaseWaitMs;
         const uint32_t slept = gapMs > stall ? static_cast<uint32_t>(gapMs) - stall : 0;
         logDeepSleepMs += slept;
-        if (useMagic == BATTERY_USE_MAGIC) useDeepSleepMs += slept;
+        if (useMagic == BATTERY_USE_MAGIC) {
+          useDeepSleepMs += slept;
+          useElapsedMs += gapMs;
+        }
       }
     }
     logSleepEntryUs = 0;
@@ -322,7 +448,9 @@ void begin() {
   // "Since last charge" starts when the cable comes out. Anchoring here as well
   // as in tick() matters for the wake-on-USB path, which can reach sleep again
   // without the main loop ever running.
-  if (useMagic != BATTERY_USE_MAGIC || onExternalPower()) anchorUsage();
+  if (useMagic != BATTERY_USE_MAGIC && !restoreUsage()) anchorUsage();
+  if (onExternalPower()) anchorUsage();
+  saveUsage();
 
   lastSampleMs = millis();
   lastRowMs = millis();
@@ -347,12 +475,14 @@ void tick() {
   if (now - lastRowMs >= ROW_INTERVAL_MS) {
     lastRowMs = now;
     writeRow("SAMPLE");
+    saveUsage();
   }
 }
 
 void flushNow(const char* event) {
   accumulate();
   writeRow(event);
+  saveUsage();
   lastRowMs = millis();
 }
 
@@ -386,13 +516,12 @@ Usage usage() {
   readGauge16(0x12, fcc);
   readGauge16(0x2C, soc);
 
-  const uint64_t now = wallUs();
   out.valid = true;
   out.startRemCapMah = useStartRemCap;
   out.remCapMah = remCap;
   out.fccMah = fcc;
   out.socPct = soc;
-  out.elapsedS = now > useAnchorUs ? static_cast<uint32_t>((now - useAnchorUs) / 1000000ULL) : 0;
+  out.elapsedS = static_cast<uint32_t>(useElapsedMs / 1000ULL);
   out.runMs = useRunMs;
   out.lightSleepMs = useLightSleepMs;
   out.deepSleepMs = useDeepSleepMs;

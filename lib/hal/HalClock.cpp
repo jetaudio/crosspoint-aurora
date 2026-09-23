@@ -95,6 +95,23 @@ bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
   return true;
 }
 
+bool HalClock::epochSeconds(uint32_t& out) const {
+  if (!_available) return false;
+  Rtc::DateTime dt;
+  if (!_sdkRtc.now(dt)) return false;
+  // Days from civil (Howard Hinnant): no mktime(), so no dependency on TZ.
+  const int y = static_cast<int>(dt.year) - (dt.month <= 2 ? 1 : 0);
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = static_cast<unsigned>(y - era * 400);
+  const unsigned mp = dt.month > 2 ? dt.month - 3u : dt.month + 9u;
+  const unsigned doy = (153 * mp + 2) / 5 + dt.day - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const int64_t days = static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
+  if (days < 0) return false;
+  out = static_cast<uint32_t>(days * 86400 + dt.hour * 3600 + dt.minute * 60 + dt.second);
+  return true;
+}
+
 bool HalClock::formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased, bool use12Hour) const {
   if (bufSize < (use12Hour ? 9u : 6u)) return false;
   uint8_t h, m;

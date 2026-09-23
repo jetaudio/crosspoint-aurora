@@ -34,6 +34,12 @@ class HalClock {
   // Returns false if RTC is not available.
   bool formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased = 48, bool use12Hour = false) const;
 
+  // Seconds since 1970-01-01 UTC, read straight from the RTC chip (not cached).
+  // Unlike gettimeofday(), this survives a full power cut for as long as the RTC
+  // keeps running. Returns false when there is no RTC or it reports its
+  // oscillator stopped, i.e. the time cannot be trusted.
+  bool epochSeconds(uint32_t& out) const;
+
   // Sync the RTC from an NTP server. Requires WiFi to be connected.
   // Blocks for up to ~5s while waiting for SNTP response.
   // Returns true if the RTC was successfully updated.
