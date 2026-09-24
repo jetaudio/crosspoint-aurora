@@ -72,6 +72,9 @@ class MappedInputManager {
   // off-target so FreeInkUI routing clears its pressed-element state.
   bool wasScreenTouchReleased() const;
   bool wasTapInRect(int x, int y, int width, int height) const;
+  // Ignore the rest of the current contact (this frame's tap included), once
+  // something has acted on it -- e.g. ActivityManager's header-tap Back.
+  void consumeTouchContact() const;
 
   // Combined touch interaction for a band of equal rows with caller-supplied
   // geometry — the shared hit-test for lists the theme helpers above do not

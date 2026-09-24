@@ -12,6 +12,8 @@
 
 class FontSelectionActivity final : public Activity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit FontSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                  const SdCardFontRegistry* registry);
 

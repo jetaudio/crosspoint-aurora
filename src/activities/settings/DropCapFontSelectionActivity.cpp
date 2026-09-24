@@ -258,14 +258,15 @@ void DropCapFontSelectionActivity::render(RenderLock&&) {
 
   const auto pageWidth = renderer.getScreenWidth();
 
-  GUI.drawHeader(renderer, Rect{0, metrics_.topPadding, pageWidth, metrics_.headerHeight}, tr(STR_DROP_CAP_FONT));
+  GUI.drawHeader(renderer, Rect{0, metrics_.topPadding, pageWidth, metrics_.headerHeight},
+                 backHeader(StrId::STR_CAT_READER));
 
   const int previewTop = afterHeader;
   const int listTop = previewTop + previewHeight + metrics_.verticalSpacing;
   const int listHeight = usableHeight - previewHeight - metrics_.verticalSpacing;
 
-  const bool previewIsDefault = previewIndex_ >= 0 && previewIndex_ < static_cast<int>(entries_.size()) &&
-                                entries_[previewIndex_].isDefault;
+  const bool previewIsDefault =
+      previewIndex_ >= 0 && previewIndex_ < static_cast<int>(entries_.size()) && entries_[previewIndex_].isDefault;
   if (previewIsDefault) {
     renderDefaultPreview(previewTop, previewHeight);
   } else {

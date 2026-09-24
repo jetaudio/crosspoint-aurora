@@ -141,6 +141,8 @@ class WifiSelectionActivity final : public Activity, private UiAppHost {
   void onComplete(bool connected);
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit WifiSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool autoConnect = true);
   void onEnter() override;
   void onExit() override;

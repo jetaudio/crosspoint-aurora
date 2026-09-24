@@ -7,8 +7,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
-#include "activities/UiTabListActivity.h"
-#include "components/OptionPopup.h"
+#include "activities/UiListActivity.h"
 
 enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
@@ -29,7 +28,6 @@ enum class SettingAction {
   DownloadFonts,
   TextSettings,
   BatteryMonitor,
-  OpenAdvanced,  // Aurora flat layout: open the Advanced Settings sub-page
   KeyboardLayouts,
   HomeButton,
   About,
@@ -175,96 +173,29 @@ struct SettingInfo {
   }
 };
 
-class SettingsActivity final : public UiTabListActivity {
-  // --- Aurora flat layout (ownsSettingsLayout themes) ---------------------
-  // A curated flat list of sections + rows (top level), with everything else
-  // behind an "Advanced Settings" sub-page. Rendered via GUI.drawSettingsScreen
-  // and driven from handleCustomInput()/render() branches, bypassing the
-  // category-tab FreeInkUI presentation below.
-  struct AuroraEntry {
-    bool isHeader = false;
-    StrId header = StrId::STR_NONE_OPT;  // section label when isHeader
-    SettingInfo setting;                 // value/action row when !isHeader
-  };
-  const bool advancedPage;  // true = the "Advanced Settings" sub-page
-  std::vector<AuroraEntry> auroraEntries;
-  int auroraSelectableCount = 0;  // number of non-header rows
-  int auroraSelected = 0;         // selected row (index among non-header rows)
-
-  static bool isTopLevelSetting(StrId nameId);
-  void buildAuroraEntries();
-  const SettingInfo* auroraSelectedSetting() const;
-  std::vector<SettingsListItem> buildSettingsItems() const;
-  Rect auroraContentRect() const;
-  bool handleAuroraInput();
-  void renderAurora();
-  void activateSetting(const SettingInfo& setting);
-
-  int selectedCategoryIndex = 0;  // Currently selected category
-  int settingsCount = 0;
-  // Row -> index into *currentSettings, or -1 for a section header. The tab
-  // list shows headers inside the category (Controls is long enough that one
-  // undivided run is hard to scan), so rows and settings are no longer 1:1.
-  std::vector<int16_t> rowSetting_;
-  // The setting a ring position points at, or nullptr on a header / the tab band.
-  const SettingInfo* settingAtRing(int ring) const;
-
-  // Per-category settings derived from shared list + device-only actions
-  std::vector<SettingInfo> displaySettings;
-  std::vector<SettingInfo> readerSettings;
-  std::vector<SettingInfo> controlsSettings;
-  std::vector<SettingInfo> systemSettings;
-  const std::vector<SettingInfo>* currentSettings = nullptr;
-
-  bool preserveQuickResumeTimeoutOn = false;
-  bool quickResumeTimeoutAutoEnabled = false;
-
-  OptionPopup optionPopup;
-
-  // Row structure (label/actionValue) for *currentSettings, rebuilt only when
-  // the active category or a category's setting list changes
-  // (rebuildRowItems(), called from selectCategory()/rebuildSettingsLists())
-  // — not on every repaint. rowValues_ holds the live per-row value text,
-  // refreshed every buildScreen() call by assigning into the existing
-  // strings (no vector growth).
-  std::vector<std::string> rowValues_;
-  std::vector<freeink::ui::ListItem> rowItems_;
-  void rebuildRowItems();
-
-  static constexpr int categoryCount = 4;
-  static constexpr StrId categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                         StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
-
-  // --- UiTabListActivity contract ---
-  int listCount() const override { return static_cast<int>(rowSetting_.size()); }
-  int tabCount() const override { return categoryCount; }
-  int activeTab() const override { return selectedCategoryIndex; }
-  const char* tabLabel(int index) const override { return I18N.get(categoryNames[index]); }
-  void buildScreen(UiScreen& screen) override;
-  void activateIndex(int index) override;
-  void onTabAction(int index) override;
-  // Steps over section headers, which are rows but not settings.
-  void navigateButtons() override;
-  void stepTab(int direction) override;
-  bool handleButtons() override;
-  bool handleCustomInput() override;
-
-  static std::string settingValueText(const SettingInfo& setting);
-  void selectCategory(int categoryIndex);
-  void applyUiSettingChange(uint8_t CrossPointSettings::* valuePtr);
-
-  void enterCategory(int categoryIndex);
-  void toggleCurrentSetting();
-  void openSleepTimeoutPicker();
-  void rebuildSettingsLists();
-  void syncQuickResumeTimeoutForSleepScreen(bool sleepScreenChanged, bool quickResumeTimeoutChanged);
-
-  void drawChrome() override;
-  void drawFooter() override;
-
+// The Settings tab's landing page: one large row per category -- icon, name,
+// and a line naming what is inside -- each opening that category's page
+// (SettingsCategoryActivity). A handful of big targets suits a touch e-ink
+// panel better than a tab band over one long list: nothing small to aim at, and
+// each category page fits most of its rows on a single screen.
+class SettingsActivity final : public UiListActivity {
  public:
-  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool advanced = false);
+  explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
   void onEnter() override;
   void onExit() override;
-  void render(RenderLock&& lock) override;
+
+ private:
+  static constexpr int kCategoryCount = 4;
+  freeink::ui::ListItem rowItems_[kCategoryCount];
+  void buildRows();
+
+  // --- UiListActivity contract ---
+  int listCount() const override { return kCategoryCount; }
+  const char* headerTitle() const override;
+  void buildScreen(UiScreen& screen) override;
+  void activateIndex(int index) override;
+  bool handleCustomInput() override;
+  void navigateButtons() override;
+  void onBackButton() override;
+  void drawFooter() override;
 };

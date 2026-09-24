@@ -1,4 +1,5 @@
 #pragma once
+#include <I18n.h>
 #include <Logging.h>
 
 #include <cassert>
@@ -52,6 +53,11 @@ class Activity {
   virtual bool isHomeActivity() const { return false; }
   virtual bool handleHomeGesture() { return false; }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
+  // True while the header band reads "‹ Parent" (see backHeader()). On touch
+  // boards a tap on that band acts as Back: ActivityManager turns it into a
+  // Back request before loop() runs, so the screen's own Back handling --
+  // including any "not now" guard -- decides what happens.
+  virtual bool hasTouchBackHeader() const { return false; }
 
   // Start a new activity without destroying the current one
   // Note: requestUpdate() will be invoked automatically once resultHandler finishes
@@ -67,4 +73,12 @@ class Activity {
   // TODO: remove this in near future
   static void onGoHome(HomeMenuItem item = HomeMenuItem::NONE);
   static void onSelectBook(const std::string& path);
+
+ protected:
+  // "‹ Parent" header text. A sub-screen names the way BACK from it, not
+  // itself: the screen you are on is the one you can see, and what the header
+  // tells a reader is where Back (or a tap on the header) lands. Returns a
+  // pointer into a shared buffer, consumed by the next header draw.
+  static const char* backHeader(StrId parent);
+  static const char* backHeader(const char* parent);
 };

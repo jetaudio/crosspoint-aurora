@@ -26,6 +26,8 @@ class XtcReaderChapterSelectionActivity final : public UiListActivity {
   int findChapterIndexForPage(uint32_t page) const;
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit XtcReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              const std::shared_ptr<Xtc>& xtc, uint32_t currentPage);
   void onEnter() override;

@@ -16,6 +16,8 @@
 // integer-scales the body glyph); the rest are the discovered drop-cap families.
 class DropCapFontSelectionActivity final : public Activity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit DropCapFontSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                         const SdCardFontRegistry* registry);
 

@@ -290,10 +290,11 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   const int contentWidth = pageWidth - hintGutterWidth;
   const int contentY = isPortraitInverted ? 50 : 0;
 
-  // Manual centering to honor content gutters.
-  const int titleX =
-      contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, tr(STR_BOOKMARKS), EpdFontFamily::BOLD)) / 2;
-  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, tr(STR_BOOKMARKS), true, EpdFontFamily::BOLD);
+  // Themed header in the content gutters; "‹ Back" doubles as the touch Back.
+  const auto& headerMetrics = UITheme::getInstance().getMetrics();
+  GUI.drawHeader(renderer,
+                 Rect{contentX, contentY + headerMetrics.topPadding, contentWidth, headerMetrics.headerHeight},
+                 backHeader(StrId::STR_ACTION_BACK));
 
   renderUi();
 

@@ -9,6 +9,8 @@
 
 class FileBrowserActivity final : public UiListActivity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return mode == Mode::PickFirmware || basepath != "/"; }
   // Books = standard reader browser; PickFirmware = filter to .bin only and return path via ActivityResult.
   enum class Mode { Books, PickFirmware };
 

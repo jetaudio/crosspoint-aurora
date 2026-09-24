@@ -35,6 +35,8 @@ class CalibreConnectActivity final : public Activity {
   void stopWebServer();
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit CalibreConnectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("CalibreConnect", renderer, mappedInput) {}
   void onEnter() override;

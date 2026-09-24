@@ -5,6 +5,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstring>
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -23,14 +24,6 @@ void UiListActivity::onEnter() {
   app.on(ACTION_ROW, &UiListActivity::rowActionTrampoline, this);
   app.setScreen(&UiListActivity::screenTrampoline, this);
   requestUpdate();
-}
-
-// "< Parent". One buffer: a frame draws one header, and drawChrome() copies it
-// into the panel before anything else can ask for another.
-const char* UiListActivity::backHeader(const StrId parent) {
-  static char buf[48];
-  snprintf(buf, sizeof(buf), "‹ %s", I18N.get(parent));
-  return buf;
 }
 
 void UiListActivity::screenTrampoline(UiScreen& screen, void* user) {
@@ -161,6 +154,11 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
       props.topIndex = static_cast<uint16_t>(prevTop);
     }
   }
+}
+
+bool UiListActivity::hasTouchBackHeader() const {
+  const char* title = headerTitle();
+  return title != nullptr && std::strncmp(title, "‹", std::strlen("‹")) == 0;
 }
 
 void UiListActivity::drawChrome() {

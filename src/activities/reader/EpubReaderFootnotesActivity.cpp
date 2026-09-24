@@ -86,7 +86,7 @@ void EpubReaderFootnotesActivity::drawChrome() {
   // Header via GUI.drawHeader (already FreeInkUI-themed); the rest of the
   // screen renders through the app.
   GUI.drawHeader(renderer, Rect{safe.x, safe.y + metrics.topPadding, safe.width, metrics.headerHeight},
-                 tr(STR_FOOTNOTES));
+                 backHeader(StrId::STR_ACTION_BACK));
 }
 
 void EpubReaderFootnotesActivity::drawFooter() {

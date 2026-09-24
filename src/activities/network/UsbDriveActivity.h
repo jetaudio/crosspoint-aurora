@@ -7,6 +7,8 @@
 
 class UsbDriveActivity final : public Activity, private UiAppHost {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   UsbDriveActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("UsbDrive", renderer, mappedInput), UiAppHost(renderer) {}
 

@@ -7,6 +7,8 @@
 // Reader status bar configuration activity
 class StatusBarSettingsActivity final : public UiListActivity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit StatusBarSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   // Must equal ITEM_COUNT in the .cpp (static_assert'd there) — the max

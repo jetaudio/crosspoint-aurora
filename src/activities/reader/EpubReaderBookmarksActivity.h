@@ -27,6 +27,8 @@ class EpubReaderBookmarksActivity final : public UiListActivity {
   OptionPopup confirmPopup;
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                        const std::shared_ptr<Epub>& epub, const std::string& epubPath);
   void onEnter() override;

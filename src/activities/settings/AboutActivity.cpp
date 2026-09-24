@@ -82,7 +82,7 @@ const char* touchControllerName(const BoardConfig::TouchController c) {
 AboutActivity::AboutActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : UiListActivity("About", renderer, mappedInput) {}
 
-const char* AboutActivity::headerTitle() const { return "About"; }
+const char* AboutActivity::headerTitle() const { return backHeader(StrId::STR_CAT_SYSTEM); }
 
 void AboutActivity::onEnter() {
   UiListActivity::onEnter();

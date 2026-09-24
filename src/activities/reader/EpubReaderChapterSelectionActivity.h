@@ -36,6 +36,8 @@ class EpubReaderChapterSelectionActivity final : public UiListActivity {
   void drawChrome() override;
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit EpubReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                               const std::shared_ptr<Epub>& epub, int currentSpineIndex);
   void onEnter() override;

@@ -1,0 +1,11 @@
+# Manifest for src/components/icons/settingsIcons.h — the Settings hub's
+# category icons. Regenerate from the repository root with:
+#   python3 freeink-sdk/libs/assets/Icons/tools/gen_icons.py \
+#     --manifest src/components/icons/settingsIcons.manifest \
+#     --svgdir freeink-sdk/libs/assets/Icons/lucide/icons \
+#     --sizes 32 --out src/components/icons/settingsIcons.h
+# then clang-format -i the output.
+settings-display = monitor
+settings-reader = book-open
+settings-controls = pointer
+settings-system = settings

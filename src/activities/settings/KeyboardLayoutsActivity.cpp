@@ -29,7 +29,7 @@ void KeyboardLayoutsActivity::onExit() {
   Activity::onExit();
 }
 
-const char* KeyboardLayoutsActivity::headerTitle() const { return tr(STR_KEYBOARD_LAYOUTS); }
+const char* KeyboardLayoutsActivity::headerTitle() const { return backHeader(StrId::STR_CAT_SYSTEM); }
 
 bool KeyboardLayoutsActivity::isLocked(const uint8_t i) const {
   const uint16_t bit = keyboard_layouts::bitAt(i);

@@ -15,6 +15,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "components/UITheme.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -111,12 +112,31 @@ void ActivityManager::loop() {
       return;
     }
 
+    // Tap-first Back: on a sub-screen whose header reads "‹ Parent", a tap on
+    // that band is Back, so leaving never depends on the edge swipe
+    // (unreliable on etched glass) or a key the board may not have. It becomes
+    // a Back request for this frame, so the screen's own Back handling runs.
+    bool backHeaderTap = false;
+    if (mappedInput.hasTouch() && currentActivity->hasTouchBackHeader()) {
+      int tx = 0;
+      int ty = 0;
+      const auto& metrics = UITheme::getInstance().getMetrics();
+      // Left 60% only: that is where the "‹ Parent" text sits, and it keeps
+      // clear of controls some headers carry on the right (OPDS search).
+      if (mappedInput.wasScreenTapped(tx, ty) && ty < metrics.topPadding + metrics.headerHeight &&
+          tx < renderer.getScreenWidth() * 3 / 5) {
+        mappedInput.consumeTouchContact();
+        MappedInputManager::requestBackAction();
+        backHeaderTap = true;
+      }
+    }
+
     // Tap-first control-center entry: a tap on the status-bar band of the
     // top-level tab screens opens it, mirroring the top-edge swipe (which some
     // panels' etched glass makes unreliable). The reader keeps its clean page
     // (no status bar there to tap). Touch boards only, like the swipe itself.
     bool statusBarTap = false;
-    if (mappedInput.hasTouch() &&
+    if (!backHeaderTap && mappedInput.hasTouch() &&
         (currentActivity->name == "Home" || currentActivity->name == "FileBrowser" ||
          currentActivity->name == "Settings" || currentActivity->name == "NetworkModeSelection")) {
       int tx = 0;

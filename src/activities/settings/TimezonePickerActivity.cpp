@@ -32,7 +32,7 @@ void TimezonePickerActivity::onEnter() {
 
 int TimezonePickerActivity::listCount() const { return static_cast<int>(timezones::count()); }
 
-const char* TimezonePickerActivity::headerTitle() const { return tr(STR_TIMEZONE); }
+const char* TimezonePickerActivity::headerTitle() const { return backHeader(StrId::STR_CLOCK); }
 
 void TimezonePickerActivity::activateIndex(const int index) {
   if (index < 0 || index >= listCount()) return;

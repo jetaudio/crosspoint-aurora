@@ -8,6 +8,8 @@
 
 class EpubReaderFootnotesActivity final : public UiListActivity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit EpubReaderFootnotesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                        const std::vector<FootnoteEntry>& footnotes);
 

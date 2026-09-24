@@ -232,7 +232,7 @@ void OpdsBookBrowserActivity::screenHeader(UiScreen& screen, const bool withSear
   // the rest of the firmware's screens.
   screen.spacer(static_cast<int16_t>(UITheme::getInstance().getMetrics().topPadding));
   fui::HeaderProps header;
-  header.title = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
+  header.title = backHeader(server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str());
   header.borderEdges = fui::EdgeBottom;
   if (withSearch && !searchTemplate.empty()) {
     header.trailingIcon = fui::bitmapFromIcon(icon_search_32);

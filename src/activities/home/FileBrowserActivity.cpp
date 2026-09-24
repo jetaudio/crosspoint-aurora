@@ -724,13 +724,20 @@ void FileBrowserActivity::drawChrome() {
   const auto pageWidth = renderer.getScreenWidth();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  std::string folderName =
-      (mode == Mode::PickFirmware)
-          ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
-          : ((basepath == "/") ? std::string(tr(STR_BROWSER)) : basepath.substr(basepath.rfind('/') + 1));
+  // A subfolder's header names the folder Back goes up to ("‹ Parent"); the
+  // root is the Files tab and keeps its plain title.
+  std::string title;
+  if (mode == Mode::PickFirmware) {
+    title = backHeader(StrId::STR_ACTION_BACK);
+  } else if (basepath == "/") {
+    title = tr(STR_BROWSER);
+  } else {
+    const std::string parent = FsHelpers::extractFolderPath(basepath);
+    title = backHeader(parent == "/" ? tr(STR_BROWSER) : parent.substr(parent.rfind('/') + 1).c_str());
+  }
   // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
   // indicator; the rest of the screen renders through the app.
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title.c_str());
 }
 
 void FileBrowserActivity::drawFooter() {

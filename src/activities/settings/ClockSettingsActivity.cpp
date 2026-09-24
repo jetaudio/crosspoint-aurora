@@ -46,7 +46,7 @@ void ClockSettingsActivity::onEnter() {
   }
 }
 
-const char* ClockSettingsActivity::headerTitle() const { return tr(STR_CLOCK); }
+const char* ClockSettingsActivity::headerTitle() const { return backHeader(StrId::STR_CAT_SYSTEM); }
 
 void ClockSettingsActivity::activateIndex(const int index) {
   nav.selected = index;

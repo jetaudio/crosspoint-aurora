@@ -7,6 +7,8 @@
 
 class QrDisplayActivity final : public Activity {
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit QrDisplayActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& textPayload)
       : Activity("QrDisplay", renderer, mappedInput), textPayload(textPayload) {}
 

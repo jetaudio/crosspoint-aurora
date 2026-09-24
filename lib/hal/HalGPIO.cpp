@@ -252,7 +252,6 @@ bool HalGPIO::rawInputActive() {
   return (g1.raw >= 0 && g1.raw < kIdleRailMin) || (g2.raw >= 0 && g2.raw < kIdleRailMin);
 }
 
-
 unsigned long HalGPIO::getPowerButtonHeldTime() const { return inputMgr.getPowerButtonHeldTime(); }
 
 bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
@@ -298,7 +297,10 @@ bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const {
   return inputMgr.wasTouchLongPress(nx, ny);
 }
 
-void HalGPIO::suppressTouchContact() { inputMgr.suppressTouchContact(); }
+void HalGPIO::suppressTouchContact() {
+  inputMgr.suppressTouchContact();
+  activeTouch = InjectTouch::None;  // an injected gesture is consumed the same way
+}
 
 unsigned long HalGPIO::lastTouchHeldMs() const { return inputMgr.lastTouchHeldMs(); }
 

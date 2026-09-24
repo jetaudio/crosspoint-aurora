@@ -172,6 +172,8 @@ bool MappedInputManager::wasScreenTapped(int& x, int& y) const {
   return true;
 }
 
+void MappedInputManager::consumeTouchContact() const { gpio.suppressTouchContact(); }
+
 bool MappedInputManager::wasScreenTouchDown(int& x, int& y) const {
   float nx = 0.0f;
   float ny = 0.0f;

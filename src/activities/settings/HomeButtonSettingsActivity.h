@@ -16,7 +16,7 @@ class HomeButtonSettingsActivity final : public UiListActivity {
   OptionPopup optionPopup;
 
   int listCount() const override { return GESTURE_COUNT; }
-  const char* headerTitle() const override { return tr(STR_HOME_BUTTON); }
+  const char* headerTitle() const override { return backHeader(StrId::STR_CAT_CONTROLS); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   bool handleCustomInput() override;

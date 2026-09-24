@@ -61,6 +61,8 @@ class CrossPointWebServerActivity final : public Activity {
   void startWebServer();
 
  public:
+  // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).
+  bool hasTouchBackHeader() const override { return true; }
   explicit CrossPointWebServerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("CrossPointWebServer", renderer, mappedInput) {}
   void onEnter() override;

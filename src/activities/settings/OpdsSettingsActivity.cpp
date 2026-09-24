@@ -202,9 +202,8 @@ void OpdsSettingsActivity::buildScreen(UiScreen& screen) {
 }
 
 const char* OpdsSettingsActivity::headerTitle() const {
-  // Reuse STR_OPDS_BROWSER as the "edit existing server" title.
-  // New server creation uses STR_ADD_SERVER.
-  return isNewServer ? tr(STR_ADD_SERVER) : tr(STR_OPDS_BROWSER);
+  // Both the add and the edit form return to the server list.
+  return backHeader(StrId::STR_OPDS_SERVERS);
 }
 
 void OpdsSettingsActivity::drawFooter() {
