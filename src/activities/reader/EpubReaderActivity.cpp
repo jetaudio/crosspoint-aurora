@@ -13,7 +13,10 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
+#include <VectorFontSupport.h>
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <algorithm>
 #include <cstring>
@@ -181,6 +184,7 @@ EpubReaderActivity::~EpubReaderActivity() {
     RECENT_BOOKS.updateProgress(epub->getPath(), static_cast<uint8_t>(percent));
   }
 
+  stopPrefetchTask();
   section.reset();
   if (pendingReadFolderMove && epub) {
     const std::string srcPath = epub->getPath();
@@ -419,6 +423,13 @@ void EpubReaderActivity::loop() {
         requestUpdate();
       }
     }
+  }
+
+  // Debounced like the idle prewarm, so the prefetch starts once the page is up and being read.
+  if (!prefetchRunning.load() && wantsPrefetch() && !RenderLock::peek() &&
+      millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS) {
+    RenderLock lock;
+    if (wantsPrefetch()) startPrefetchTask();
   }
 
   const bool atEndOfBook = currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount();
@@ -915,6 +926,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           uint16_t backupPage = section->currentPage;
           uint16_t backupPageCount = section->pageCount;
           section.reset();
+          resetPrefetch();
           epub->clearCache();
           epub->setupCacheDir();
           if (!saveProgress(backupSpine, backupPage, backupPageCount)) {
@@ -1143,8 +1155,146 @@ void EpubReaderActivity::onReturnFromEndOfBook() {
 }
 
 bool EpubReaderActivity::skipLoopDelay() {
+  // Light sleep halts both cores, and the prefetch task may be mid-SD-write. Bounded: the task
+  // exits at PREFETCH_TARGET_PAGES.
+  if (prefetchRunning.load()) return true;
   return section && section->isBuilding() && !buildHeapPaused &&
          (section->isPartial() || static_cast<int>(section->pageCount) < section->currentPage + BUILD_WINDOW_AHEAD);
+}
+
+bool EpubReaderActivity::wantsPrefetch() const {
+  if (!epub || !section || buildViewportWidth == 0) return false;
+  // One build at a time: the current chapter's own build (or its partial extension) comes first.
+  if (section->isBuilding() || section->isPartial()) return false;
+  const int nextSpine = currentSpineIndex + 1;
+  if (nextSpine >= epub->getSpineItemsCount() || prefetchDoneSpine == nextSpine) return false;
+  return section->currentPage + PREFETCH_PAGES_BEFORE_END >= static_cast<int>(section->pageCount);
+}
+
+void EpubReaderActivity::startPrefetchTask() {
+#if CROSSPOINT_VECTOR_FONTS
+  constexpr uint32_t stackBytes = 16384;  // glyph faults during layout rasterize with FreeType (see render task)
+#else
+  constexpr uint32_t stackBytes = 8192;
+#endif
+  prefetchQuit = false;
+  prefetchCancel = false;
+  prefetchRunning = true;
+  // CPU 0: the render task and the Arduino loop live on CPU 1 on dual-core parts, so the unlocked
+  // inflate runs truly in parallel. Single-core parts just time-slice it with the loop.
+  if (xTaskCreatePinnedToCore(&prefetchTaskTrampoline, "ReaderPrefetch", stackBytes, this, 1, nullptr, 0) != pdPASS) {
+    LOG_ERR("ERS", "Prefetch: failed to create task");
+    prefetchRunning = false;
+    prefetchDoneSpine = currentSpineIndex + 1;  // the chapter turn builds it in the foreground as before
+  }
+}
+
+void EpubReaderActivity::prefetchTaskTrampoline(void* param) {
+  static_cast<EpubReaderActivity*>(param)->prefetchTaskMain();
+  vTaskDelete(nullptr);
+}
+
+void EpubReaderActivity::prefetchTaskMain() {
+  while (!prefetchQuit.load()) {
+    std::string inflateHref;
+    {
+      // Bounded wait: teardown holds the lock while it waits for this task to exit.
+      RenderLock lock(RenderLock::TryFor{PREFETCH_LOCK_WAIT_MS});
+      if (!lock.locked()) continue;
+      if (prefetchQuit.load() || !prefetchLockedStep(inflateHref)) break;
+    }
+    if (!inflateHref.empty()) {
+      const int spine = prefetchInflating.load();
+      // vTaskDelay per 8 KB chunk lets this core's idle task feed the task watchdog.
+      const bool ok = Section::inflateHtmlCache(*epub, inflateHref, spine, [this] {
+        vTaskDelay(1);
+        return !prefetchCancel.load();
+      });
+      const bool cancelled = prefetchCancel.load();
+      if (!ok && !cancelled) prefetchFailedSpine = spine;
+      prefetchInflating = -1;  // releases a resetPrefetch() waiting on this inflate
+      LOG_DBG("ERS", "Prefetch: inflate of spine %d %s", spine, ok ? "done" : cancelled ? "cancelled" : "failed");
+    }
+    vTaskDelay(1);  // between locked steps: let the render task and this core's idle task in
+  }
+  prefetchRunning = false;  // last touch of `this`: teardown may free it from here on
+}
+
+bool EpubReaderActivity::prefetchLockedStep(std::string& inflateHref) {
+  if (!wantsPrefetch()) return false;
+  const int nextSpine = currentSpineIndex + 1;
+  if (prefetchFailedSpine.load() == nextSpine) {
+    prefetchFailedSpine = -1;
+    prefetchDoneSpine = nextSpine;
+    return false;
+  }
+  if (prefetchSection && prefetchSpine != nextSpine) prefetchSection.reset();
+  if (!buildTickHeapGate()) {
+    LOG_DBG("ERS", "Prefetch: heap low, skipping spine %d", nextSpine);
+    prefetchDoneSpine = nextSpine;
+    return false;
+  }
+
+  if (!prefetchSection) {
+    const ReaderRenderSpec spec = SETTINGS.readerRenderSpec(buildViewportWidth, buildViewportHeight);
+    auto next = std::unique_ptr<Section>(new Section(epub, nextSpine, renderer));
+    if (next->loadSectionFile(spec)) {
+      prefetchDoneSpine = nextSpine;  // already cached (finalized or partial)
+      return false;
+    }
+    if (!next->hasHtmlCache()) {
+      // The spine lookup reads the shared book cache file, so resolve it here under the lock;
+      // the inflate itself runs after unlocking.
+      inflateHref = epub->getSpineItem(nextSpine).href;
+      prefetchInflating = nextSpine;
+      return true;
+    }
+    if (!next->startBuild(spec)) {
+      LOG_ERR("ERS", "Prefetch: failed to start build of spine %d", nextSpine);
+      prefetchDoneSpine = nextSpine;
+      return false;
+    }
+    LOG_DBG("ERS", "Prefetch: building spine %d", nextSpine);
+    prefetchSection = std::move(next);
+    prefetchSpine = nextSpine;
+    return true;
+  }
+
+  if (!prefetchSection->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
+    LOG_ERR("ERS", "Prefetch: build of spine %d failed", nextSpine);
+    prefetchSection.reset();
+    prefetchDoneSpine = nextSpine;
+    return false;
+  }
+  if (prefetchSection->isBuildComplete() || prefetchSection->pageCount >= PREFETCH_TARGET_PAGES) {
+    LOG_DBG("ERS", "Prefetch: spine %d ready (%d pages%s)", nextSpine, prefetchSection->pageCount,
+            prefetchSection->isBuildComplete() ? ", complete" : "");
+    prefetchSection.reset();  // ~Section suspends an unfinished build to a partial .bin
+    prefetchDoneSpine = nextSpine;
+    return false;
+  }
+  return true;
+}
+
+void EpubReaderActivity::resetPrefetch(const int awaitSpine) {
+  // Holding the RenderLock keeps the task between steps, so only an unlocked inflate can be in
+  // flight. Awaiting one for the spine about to open beats redoing it in the foreground.
+  if (prefetchInflating.load() >= 0) {
+    if (prefetchInflating.load() != awaitSpine) prefetchCancel = true;
+    while (prefetchInflating.load() >= 0) vTaskDelay(pdMS_TO_TICKS(5));
+    prefetchCancel = false;
+  }
+  prefetchSection.reset();
+  prefetchSpine = -1;
+  prefetchDoneSpine = -1;
+}
+
+void EpubReaderActivity::stopPrefetchTask() {
+  prefetchQuit = true;
+  prefetchCancel = true;
+  // The task either finishes its inflate (cancelled) or times out waiting for the lock we hold.
+  while (prefetchRunning.load()) vTaskDelay(pdMS_TO_TICKS(5));
+  prefetchSection.reset();
 }
 
 void EpubReaderActivity::renderBook() {
@@ -1200,6 +1350,7 @@ void EpubReaderActivity::renderBook() {
   const ReaderRenderSpec renderSpec = SETTINGS.readerRenderSpec(viewportWidth, viewportHeight);
 
   if (!section) {
+    resetPrefetch(currentSpineIndex);
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
     section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));

@@ -469,6 +469,10 @@ RenderLock::RenderLock([[maybe_unused]] Activity&) {
   isLocked = true;
 }
 
+RenderLock::RenderLock(const TryFor timeout) {
+  isLocked = xSemaphoreTake(activityManager.renderingMutex, pdMS_TO_TICKS(timeout.ms)) == pdTRUE;
+}
+
 RenderLock::~RenderLock() {
   if (isLocked) {
     xSemaphoreGive(activityManager.renderingMutex);

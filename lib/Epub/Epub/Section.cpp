@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -79,7 +80,98 @@ constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) +
                                  sizeof(uint8_t) + sizeof(bool) + sizeof(bool) + sizeof(bool) + sizeof(int) +
                                  sizeof(int8_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) +
                                  sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+// startBuild() drops the rebuildable font caches only below this headroom. The default heap
+// includes PSRAM where present, so PSRAM boards keep their caches across chapter builds.
+constexpr size_t BUILD_FONT_RELEASE_MIN_FREE = 96 * 1024;
+constexpr size_t BUILD_FONT_RELEASE_MIN_BLOCK = 48 * 1024;
+
+// Forwards to `out`, but asks `onChunk` before each write; a false answer fails the write,
+// which makes ZipFile::readFileToStream abort the inflate.
+class ChunkHookPrint final : public Print {
+  Print& out;
+  const std::function<bool()>& onChunk;
+
+ public:
+  bool aborted = false;
+  ChunkHookPrint(Print& out, const std::function<bool()>& onChunk) : out(out), onChunk(onChunk) {}
+  size_t write(const uint8_t b) override { return write(&b, 1); }
+  size_t write(const uint8_t* buf, const size_t len) override {
+    if (aborted || !onChunk()) {
+      aborted = true;
+      return 0;
+    }
+    return out.write(buf, len);
+  }
+};
+
+// Inflate one spine item from the zip into `path`, retrying SD timing hiccups. Leaves no file
+// behind on failure. Uses only the zip and storage, so it is safe off the render task.
+bool inflateItemToFile(const Epub& epub, const std::string& href, const std::string& path,
+                       const std::function<bool()>& onChunk) {
+  for (int attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
+      delay(50);  // Brief delay before retry
+    }
+
+    // Remove any incomplete file from previous attempt before retrying
+    if (Storage.exists(path.c_str())) {
+      Storage.remove(path.c_str());
+    }
+
+    HalFile out;
+    if (!Storage.openFileForWrite("SCT", path, out)) {
+      continue;
+    }
+    // Larger chunks mean far fewer SD writes inflating the HTML; a 1KB chunk turned a 584KB
+    // single-spine novel into ~570 tiny writes (multi-second). 8KB keeps the transient buffers
+    // small while cutting the write count 8x.
+    bool streamed;
+    bool aborted = false;
+    if (onChunk) {
+      ChunkHookPrint hooked(out, onChunk);
+      streamed = epub.readItemContentsToStream(href, hooked, 8192);
+      aborted = hooked.aborted;
+    } else {
+      streamed = epub.readItemContentsToStream(href, out, 8192);
+    }
+    const uint32_t fileSize = out.size();
+    // Explicitly close() file before calling Storage.remove()
+    out.close();
+
+    if (streamed) {
+      LOG_DBG("SCT", "Streamed HTML to %s (%u bytes)", path.c_str(), (unsigned)fileSize);
+      return true;
+    }
+    // If streaming failed, remove the incomplete file immediately
+    if (Storage.exists(path.c_str())) {
+      Storage.remove(path.c_str());
+    }
+    if (aborted) {
+      LOG_DBG("SCT", "Inflate of %s cancelled", path.c_str());
+      return false;
+    }
+    LOG_DBG("SCT", "Removed incomplete temp file after failed attempt");
+  }
+  LOG_ERR("SCT", "Failed to stream item contents to temp file after retries");
+  return false;
+}
 }  // namespace
+
+bool Section::inflateHtmlCache(const Epub& epub, const std::string& href, const int spineIndex,
+                               const std::function<bool()>& onChunk) {
+  const auto htmlDir = epub.getCachePath() + "/html";
+  const auto htmlPath = htmlDir + "/" + std::to_string(spineIndex) + ".html";
+  if (Storage.exists(htmlPath.c_str())) return true;
+  Storage.mkdir(htmlDir.c_str());
+  // Own temp name: never collides with a foreground startBuild() inflating via .tmp_N.
+  const auto tmpPath = htmlDir + "/.pf_" + std::to_string(spineIndex) + ".html";
+  if (!inflateItemToFile(epub, href, tmpPath, onChunk)) return false;
+  if (Storage.exists(htmlPath.c_str()) || !Storage.rename(tmpPath.c_str(), htmlPath.c_str())) {
+    Storage.remove(tmpPath.c_str());
+  }
+  return Storage.exists(htmlPath.c_str());
+}
 
 // Out-of-line so the unique_ptr<ChapterHtmlSlimParser> in BuildContext can be
 // constructed/destroyed where the parser's full definition is visible.
@@ -294,9 +386,17 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
     LOG_ERR("SCT", "startBuild called while a build is already active");
     return false;
   }
-  // Reclaim rebuildable font caches before CSS and layout allocations.
+  // Reclaim rebuildable font caches before CSS and layout allocations -- but only when the
+  // heap is actually tight. Dropping them unconditionally made every fresh chapter re-read
+  // glyph advances/bitmaps from SD (slow chapter turns) even on PSRAM boards with room to spare;
+  // the low-headroom case this guards (#3527, a C3 with ~3.5 KB free) still releases.
   if (auto* fontCache = renderer.getFontCacheManager()) {
-    fontCache->releaseSdFontCaches();
+    const HalMemory::HeapStats heap = HalMemory::getDefaultHeap();
+    if (heap.freeBytes < BUILD_FONT_RELEASE_MIN_FREE || heap.largestBlockBytes < BUILD_FONT_RELEASE_MIN_BLOCK) {
+      LOG_DBG("SCT", "Low heap before build (%u free, %u block); releasing font caches", (unsigned)heap.freeBytes,
+              (unsigned)heap.largestBlockBytes);
+      fontCache->releaseSdFontCaches();
+    }
   }
   buildComplete_ = false;
   builtPageCount_ = 0;
@@ -336,45 +436,9 @@ bool Section::startBuild(const ReaderRenderSpec& spec, const std::function<void(
   } else {
     Storage.mkdir(htmlDir.c_str());
 
-    // Retry logic for SD card timing issues
-    bool streamed = false;
-    uint32_t fileSize = 0;
-    for (int attempt = 0; attempt < 3 && !streamed; attempt++) {
-      if (attempt > 0) {
-        LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
-        delay(50);  // Brief delay before retry
-      }
-
-      // Remove any incomplete file from previous attempt before retrying
-      if (Storage.exists(tmpHtmlPath.c_str())) {
-        Storage.remove(tmpHtmlPath.c_str());
-      }
-
-      HalFile tmpHtml;
-      if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
-        continue;
-      }
-      // Larger chunks mean far fewer SD writes inflating the HTML; a 1KB chunk turned a 584KB
-      // single-spine novel into ~570 tiny writes (multi-second). 8KB keeps the transient buffers
-      // small while cutting the write count 8x.
-      streamed = epub->readItemContentsToStream(localPath, tmpHtml, 8192);
-      fileSize = tmpHtml.size();
-      // Explicitly close() file before calling Storage.remove()
-      tmpHtml.close();
-
-      // If streaming failed, remove the incomplete file immediately
-      if (!streamed && Storage.exists(tmpHtmlPath.c_str())) {
-        Storage.remove(tmpHtmlPath.c_str());
-        LOG_DBG("SCT", "Removed incomplete temp file after failed attempt");
-      }
-    }
-
-    if (!streamed) {
-      LOG_ERR("SCT", "Failed to stream item contents to temp file after retries");
+    if (!inflateItemToFile(*epub, localPath, tmpHtmlPath, nullptr)) {
       return false;
     }
-
-    LOG_DBG("SCT", "Streamed temp HTML to %s (%d bytes)", tmpHtmlPath.c_str(), fileSize);
 
     // Promote to the persistent HTML cache immediately -- the inflate is complete and the bytes are
     // valid regardless of whether the layout build finishes, so reopening (even a window-only spine

@@ -128,6 +128,13 @@ class Section {
   // giant spine) zip inflation. Lets the reader skip the indexing popup on a fast reopen/rebuild.
   bool hasHtmlCache() const;
 
+  // Unzip spine item `href` into the per-book HTML cache (the file hasHtmlCache() checks), unless
+  // it is already there. Touches only the zip and storage -- no renderer or book-metadata state --
+  // so a background task may run it without the render lock. `onChunk` (optional) runs before
+  // each output write; returning false cancels the inflate and leaves no cache file behind.
+  static bool inflateHtmlCache(const Epub& epub, const std::string& href, int spineIndex,
+                               const std::function<bool()>& onChunk = nullptr);
+
   // Look up the page number for an anchor id from the section cache file.
   std::optional<uint16_t> getPageForAnchor(const std::string& anchor) const;
 

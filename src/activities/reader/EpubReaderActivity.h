@@ -6,6 +6,7 @@
 #include <Epub/Section.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -129,7 +130,39 @@ class EpubReaderActivity final : public ReaderActivity {
   bool applyDeferredReposition();
   void clearDeferredReposition();
   void rememberCurrentContentOffset();
-  void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
+  // Next-chapter prefetch. Once the reader is within PREFETCH_PAGES_BEFORE_END pages of the
+  // chapter end, a short-lived task on CPU 0 inflates the next spine's HTML (no lock: zip +
+  // storage only) and then lays out PREFETCH_TARGET_PAGES pages in small steps, each under the
+  // RenderLock (layout shares the renderer's font caches). The Section is then dropped -- its
+  // destructor suspends the build to a partial .bin, or it finalizes for a short chapter -- so
+  // the chapter turn opens from cache instead of inflating and parsing on the key press.
+  // prefetchSection/prefetchSpine/prefetchDoneSpine are only touched under the RenderLock.
+  std::unique_ptr<Section> prefetchSection;
+  int prefetchSpine = -1;                    // spine prefetchSection builds
+  int prefetchDoneSpine = -1;                // spine already prefetched (or found cached / failed): don't retry
+  std::atomic<bool> prefetchRunning{false};  // task alive; cleared as its last touch of `this`
+  std::atomic<bool> prefetchQuit{false};     // ask the task to exit (activity teardown)
+  std::atomic<bool> prefetchCancel{false};   // abort the in-flight inflate
+  std::atomic<int> prefetchInflating{-1};    // spine being inflated without the lock, or -1
+  std::atomic<int> prefetchFailedSpine{-1};  // inflate failed (not cancelled): give up on it
+  static constexpr int PREFETCH_PAGES_BEFORE_END = 3;
+  // Past PARTIAL_REBUILD_START_MARGIN, renderBook() opens the partial without starting the
+  // extension build first, so the turn draws straight from cache.
+  static constexpr int PREFETCH_TARGET_PAGES = PARTIAL_REBUILD_START_MARGIN + 1;
+  static constexpr uint32_t PREFETCH_LOCK_WAIT_MS = 50;
+  bool wantsPrefetch() const;
+  void startPrefetchTask();
+  static void prefetchTaskTrampoline(void* param);
+  void prefetchTaskMain();
+  // One unit of prefetch work under the RenderLock. Returns false when there is nothing left
+  // to do; sets inflateHref when the caller must inflate `prefetchInflating` after unlocking.
+  bool prefetchLockedStep(std::string& inflateHref);
+  // Caller holds the RenderLock. Waits out (or, unless it is `awaitSpine`, cancels) an
+  // in-flight inflate, drops the prefetch Section (persisting what it built) and forgets what
+  // was prefetched, so a chapter turn or settings change re-evaluates against the new layout.
+  void resetPrefetch(int awaitSpine = -1);
+  // Teardown: stop the task and wait for it to exit. Caller holds the RenderLock.
+  void stopPrefetchTask();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
