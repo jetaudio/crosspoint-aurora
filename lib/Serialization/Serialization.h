@@ -37,15 +37,28 @@ inline void writeString(HalFile& file, const std::string& s) {
 }
 
 inline void readString(std::istream& is, std::string& s) {
-  uint32_t len;
+  uint32_t len = 0;
   readPod(is, len);
+  if (!is) {
+    s.clear();
+    return;
+  }
   s.resize(len);
   is.read(&s[0], len);
 }
 
 inline void readString(HalFile& file, std::string& s) {
-  uint32_t len;
+  uint32_t len = 0;
   readPod(file, len);
+  // A card that stops answering mid-read hands back 0xFF bytes, so the length
+  // prefix comes out as ~4 GB. resize() on that throws bad_alloc, which nothing
+  // catches -- the reader aborted instead of reporting a failed page. No string
+  // can be longer than what is left of the file.
+  const int remaining = file.available();
+  if (remaining < 0 || len > static_cast<uint32_t>(remaining)) {
+    s.clear();
+    return;
+  }
   s.resize(len);
   file.read(&s[0], len);
 }
