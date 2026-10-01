@@ -141,13 +141,18 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
   const int prevTop = n.top;
   const bool trusted = n.trusts(listCount());
   const int drawn = n.drawnRows;
+  // Only a follow (button navigation / open-on-selection) may be anchored: a
+  // swipe's pending scroll must move the viewport even while the selection is
+  // still on screen, or lists that open on a visible selection (Language)
+  // never scroll.
+  const bool following = n.followOnBuild.load();
 
   screen.syncListViewport(n, props, listCount(), selectionOffset);
 
   // When the selection is already visible in the current viewport (based on
   // the measured drawnRows rather than the unweighted visibleRows estimate),
   // keep the viewport anchored instead of jumping to top.
-  if (trusted && drawn > 0) {
+  if (following && trusted && drawn > 0) {
     const int sel = props.selectedIndex;
     if (sel >= prevTop && sel < prevTop + drawn) {
       n.top = prevTop;
