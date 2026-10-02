@@ -7,6 +7,10 @@ class GfxRenderer;
 namespace AuroraMetrics {
 constexpr ThemeMetrics values = [] {
   ThemeMetrics v = BaseMetrics::values;
+  // Aurora draws its own one-line status/title bar (drawHeaderBar), not the
+  // base two-row header (status strip + title row) the 84px default is sized
+  // for. Inheriting that height pushes every list ~40px below its divider.
+  v.headerHeight = 45;
   // Aurora draws the whole home screen itself, so it loads several recent books:
   // index 0 is the "Now Reading" featured card, the rest form the library list.
   v.homeRecentBooksCount = 6;
