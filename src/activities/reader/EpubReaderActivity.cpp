@@ -41,6 +41,7 @@
 #include "QrDisplayActivity.h"
 #include "ReaderActivity.h"
 #include "ReaderFontSizes.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "ReaderToolbarUi.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
@@ -895,6 +896,53 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             } else {
               jumpToPercent(std::get<PercentResult>(result.data).percent);
             }
+          });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::GO_TO_CHAPTER: {
+      // Chapter N is the Nth row of the chapter list (TOC), so the number the
+      // user types matches what Select Chapter shows. Books without a TOC fall
+      // back to spine items.
+      const int tocCount = epub->getTocItemsCount();
+      const int count = tocCount > 0 ? tocCount : epub->getSpineItemsCount();
+      if (count <= 0) {
+        openReaderMenu();
+        break;
+      }
+      const std::string countText = std::to_string(count);
+      std::string title = std::string(tr(STR_GO_TO_CHAPTER)) + " (1-" + countText + ")";
+      startActivityForResult(
+          std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, std::move(title), "", countText.size(),
+                                                  InputType::Number),
+          [this, tocCount, count](const ActivityResult& result) {
+            if (result.isCancelled) {
+              openReaderMenu();
+              return;
+            }
+            const std::string& text = std::get<KeyboardResult>(result.data).text;
+            if (text.empty()) {
+              openReaderMenu();
+              return;
+            }
+            const int chapter = std::clamp(atoi(text.c_str()), 1, count);
+            int spineIndex = chapter - 1;
+            std::string anchor;
+            if (tocCount > 0) {
+              const auto tocItem = epub->getTocItem(chapter - 1);
+              if (tocItem.spineIndex < 0) {
+                openReaderMenu();
+                return;
+              }
+              spineIndex = tocItem.spineIndex;
+              anchor = tocItem.anchor;
+            }
+            RenderLock lock;
+            clearDeferredReposition();
+            currentSpineIndex = spineIndex;
+            pendingAnchor = std::move(anchor);
+            nextPageNumber = 0;
+            section.reset();
+            requestUpdate();
           });
       break;
     }

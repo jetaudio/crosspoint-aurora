@@ -10,7 +10,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
-enum class InputType { Text, Password, Url };
+// Number: a phone-style 3x4 digit pad (1-9, Del 0 OK) and nothing else.
+enum class InputType { Text, Password, Url, Number };
 
 // Text entry on the FreeInkUI keyboard component: the SDK layout tables and
 // keyboard() do the key rendering and hit-rect registration, InteractionBuffer

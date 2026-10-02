@@ -95,6 +95,15 @@ const fui::KeyboardKey URL_SNIP_BOTTOM[] = {UKS("abc", fui::KeyKind::Mode, fui::
                                             UKS("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE, 2),
                                             UKS("OK", fui::KeyKind::Ok, fui::QWERTY_KEY_ENTER, 2)};
 
+// Phone-style digit pad for InputType::Number: three columns, no letter,
+// symbol or shift layers to wander into.
+const fui::KeyboardKey PAD_ROW1[] = {UK("1", "1", '1'), UK("2", "2", '2'), UK("3", "3", '3')};
+const fui::KeyboardKey PAD_ROW2[] = {UK("4", "4", '4'), UK("5", "5", '5'), UK("6", "6", '6')};
+const fui::KeyboardKey PAD_ROW3[] = {UK("7", "7", '7'), UK("8", "8", '8'), UK("9", "9", '9')};
+const fui::KeyboardKey PAD_BOTTOM[] = {UKS("Del", fui::KeyKind::Delete, fui::QWERTY_KEY_BACKSPACE, 1),
+                                       UK("0", "0", '0'),
+                                       UKS("OK", fui::KeyKind::Ok, fui::QWERTY_KEY_ENTER, 1)};
+
 #undef UK
 #undef UKA
 #undef UKW
@@ -111,6 +120,9 @@ const fui::KeyboardLayout URL_LAYOUT{URL_ROWS, 5};
 const fui::KeyboardLayout URL_SHIFT_LAYOUT{URL_SHIFT_ROWS, 5};
 const fui::KeyboardLayout URL_SNIPPET_LAYOUT{URL_SNIP_ROWS, 4};
 
+const fui::KeyboardRow PAD_ROWS[] = {{PAD_ROW1, 3, 0}, {PAD_ROW2, 3, 0}, {PAD_ROW3, 3, 0}, {PAD_BOTTOM, 3, 0}};
+const fui::KeyboardLayout NUMBER_PAD_LAYOUT{PAD_ROWS, 4};
+
 }  // namespace
 
 void KeyboardEntryActivity::onEnter() {
@@ -118,7 +130,8 @@ void KeyboardEntryActivity::onEnter() {
   cursorPos = text.length();
   // URL layers are EN-arranged app tables; everything else opens on the UI
   // language's layout, or on an enabled one if the user switched that off.
-  layoutId = inputType == InputType::Url ? fui::KeyboardLayoutId::QwertyEn : keyboard_layouts::startingLayout();
+  layoutId = (inputType == InputType::Url || inputType == InputType::Number) ? fui::KeyboardLayoutId::QwertyEn
+                                                                           : keyboard_layouts::startingLayout();
   // The key only earns its slot in the bottom row with somewhere to go.
   const uint16_t enabledLayouts = keyboard_layouts::enabled();
   showLangKey = (enabledLayouts & (enabledLayouts - 1)) != 0;
@@ -147,6 +160,7 @@ void KeyboardEntryActivity::onEnter() {
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
+  if (inputType == InputType::Number) return NUMBER_PAD_LAYOUT;
   if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
   if (inputType == InputType::Url) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
@@ -513,7 +527,9 @@ fui::Rect KeyboardEntryActivity::keyboardRect() const {
   const int rows = currentLayout().rowCount;
   const int gap = metrics.keyboardKeySpacing;
   const int height = rows * metrics.keyboardKeyHeight + (rows > 1 ? (rows - 1) * gap : 0);
-  const int width = pageWidth * metrics.keyboardWidthPercent / 100;
+  int width = pageWidth * metrics.keyboardWidthPercent / 100;
+  // Three keys stretched across a landscape panel stop reading as a keypad.
+  if (inputType == InputType::Number) width = std::min(width, pageWidth * 3 / 5);
   const int x = (pageWidth - width) / 2;
   const int y =
       pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing - height + metrics.keyboardVerticalOffset;
@@ -905,6 +921,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   int tipCount = 0;
   if (cursorMode) {
     tipCount = 1;
+  } else if (inputType == InputType::Number) {
+    tipCount = !text.empty() ? 1 : 0;
   } else if (urlPanel) {
     tipCount = 1 + (!text.empty() ? 1 : 0);
   } else if (symbols) {
@@ -919,6 +937,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     y += tipsLh;
     if (cursorMode) {
       drawTip(tr(STR_KB_HINT_RETURN_KEYBOARD), y);
+    } else if (inputType == InputType::Number) {
+      drawTip(tr(STR_KB_HINT_CLEAR_TEXT), y);
     } else if (urlPanel) {
       drawTip(tr(STR_KB_HINT_EXIT_URL_MODE), y);
       y += tipsLh;
