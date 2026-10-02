@@ -34,6 +34,9 @@ class HalPowerManager {
 #endif
   static constexpr unsigned long IDLE_POWER_SAVING_MS = 3000;  // ms
   static constexpr unsigned long BATTERY_POLL_MS = 1500;       // ms
+  // Longest a power-off waits for the keys to come up before giving up on ship
+  // mode and sleeping instead.
+  static constexpr uint32_t SHIP_MODE_KEY_WAIT_MS = 5000;  // ms
 
   void begin();
 

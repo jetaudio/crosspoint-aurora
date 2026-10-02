@@ -24,6 +24,45 @@ HalPowerManager powerManager;  // Singleton instance
 // X4 Pro display chip select.
 static constexpr gpio_num_t XTEINK_C3_GPIO13 = GPIO_NUM_13;
 
+// The plain active-low GPIO keys of a DigitalButtons board. On the T5 S3 one of
+// them can be wired to the BQ25896's /QON, in parallel with the PWR button, and
+// bound to Power off -- so the key that asks for ship mode is the very line the
+// charger watches to leave it again.
+static uint64_t directKeyMask() {
+  const auto& b = BoardConfig::ACTIVE;
+  if (b.inputStyle != BoardConfig::InputStyle::DigitalButtons) return 0;
+  uint64_t mask = 0;
+  for (const int8_t pin : {b.input.back, b.input.confirm, b.input.left, b.input.right, b.input.up, b.input.down}) {
+    if (pin >= 0) mask |= 1ULL << pin;
+  }
+  return mask;
+}
+
+// Waits until every key in `mask` has read released for KEY_RELEASE_STABLE_MS in
+// a row. False if one is still down after maxMs.
+static bool waitForKeysReleased(const uint64_t mask, const uint32_t maxMs) {
+  constexpr uint32_t KEY_RELEASE_STABLE_MS = 100;
+  for (int pin = 0; pin < 64; ++pin) {
+    if (mask & (1ULL << pin)) pinMode(pin, INPUT_PULLUP);
+  }
+  const uint32_t start = millis();
+  uint32_t releasedAt = start;
+  while (true) {
+    bool anyDown = false;
+    for (int pin = 0; pin < 64 && !anyDown; ++pin) {
+      if ((mask & (1ULL << pin)) && digitalRead(pin) == LOW) anyDown = true;
+    }
+    const uint32_t now = millis();
+    if (anyDown) {
+      releasedAt = now;
+    } else if (now - releasedAt >= KEY_RELEASE_STABLE_MS) {
+      return true;
+    }
+    if (now - start >= maxMs) return false;
+    delay(10);
+  }
+}
+
 void HalPowerManager::begin() {
   if (BoardConfig::ACTIVE.batteryAdc >= 0) {
     pinMode(BoardConfig::ACTIVE.batteryAdc, INPUT);
@@ -152,9 +191,24 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio, const bool powerOff) const {
     // battery the write below is the last thing this boot executes. The delay
     // covers the BATFET turn-off time; if we are still here after it the board
     // is on USB (or has no such charger) and sleeps normally instead.
-    if (gpio.enterChargerShipMode()) {
+    //
+    // Never open the BATFET while a key is down. A key wired to /QON (T5 S3,
+    // next to the PWR button) that is released mid-teardown and pressed again
+    // would be LOW at the moment of the write: the charger counts that press
+    // toward its ship-mode exit and closes the BATFET again a fraction of a
+    // second later. The rail dips instead of dying, and the ESP either rides
+    // through it into a deep sleep only BOOT can wake, or comes out of the dip
+    // without a clean reset -- either way it looks hung until RST.
+    const uint64_t keys = directKeyMask();
+    const bool keysReleased = waitForKeysReleased(keys, SHIP_MODE_KEY_WAIT_MS);
+    if (keysReleased && gpio.enterChargerShipMode()) {
       delay(500);
     }
+    // Still alive: USB power, no charger, a key held throughout, or the charger
+    // left ship mode on its own. Let the keys wake this sleep as well as BOOT,
+    // so the button that just asked for "off" can also bring the board back --
+    // but only once released, or a held key would wake it on the spot.
+    if (keysReleased) freeink::PowerManager::setExtraWakePins(keys);
   }
 
   // Waits for the power button to be physically released (so holding it doesn't
