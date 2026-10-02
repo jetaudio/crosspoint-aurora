@@ -14,6 +14,7 @@
 
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
+#include "components/HeaderBackTapTarget.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/cover.h"
@@ -616,7 +617,10 @@ int AuroraTheme::settingsItemAt(const GfxRenderer& renderer, Rect content, const
   return -1;
 }
 
-void AuroraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
+void AuroraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                             bool /*backButton*/) const {
+  // No arrow button here, so no stale tap rect from a previous theme's header.
+  HeaderBackTapTarget::clear();
   const auto& m = AuroraMetrics::values;
   const int P = m.contentSidePadding;
 

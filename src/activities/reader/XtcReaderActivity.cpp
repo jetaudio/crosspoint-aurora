@@ -258,6 +258,7 @@ void XtcReaderActivity::renderPage() {
     free(pageBuffer);
 
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
+    markPageRendered();
     return;
   } else {
     const size_t srcRowBytes = (pageWidth + 7) / 8;
@@ -288,6 +289,7 @@ void XtcReaderActivity::renderPage() {
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+  markPageRendered();
 }
 
 bool XtcReaderActivity::pageTurnImpl(bool isForward) {

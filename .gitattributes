@@ -1,0 +1,3 @@
+# git apply needs these byte-exact: SdFat ships LF sources, so a CRLF checkout
+# (core.autocrlf on Windows) makes every hunk fail to match.
+scripts/sdfat_patches/*.patch text eol=lf

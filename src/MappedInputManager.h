@@ -124,8 +124,6 @@ class MappedInputManager {
   // Top-edge down-swipe opens the light panel when the active board actually
   // has a frontlight. ActivityManager consumes it before activity input.
   bool wasLightPanelGesture() const;
-  bool wasAnyPressed() const;
-  bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
   // True when this frame's Back came from something other than a physical Back
   // button — a home-key tap bound to Back, or the button dispatcher. There is no

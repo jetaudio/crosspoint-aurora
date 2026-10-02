@@ -35,6 +35,7 @@
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "util/ScreenOrientation.h"
@@ -204,6 +205,7 @@ std::vector<SettingInfo> collectSettings(const Category category) {
       // published yet just report no update available.
       out.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
       out.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+      out.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
       out.push_back(SettingInfo::Action(StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts));
       out.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
       out.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
@@ -330,15 +332,17 @@ void SettingsCategoryActivity::buildScreen(UiScreen& screen) {
   props.labelText = theme.bodyText;
   props.labelText.maxLines = 2;
   props.valueText = theme.smallText;
+  syncListViewport(screen, props);
   // A switch big enough to read at arm's length and to hit with a thumb,
-  // rounded with the theme's capsule token.
+  // rounded with the theme's capsule token. Set after syncListViewport(),
+  // whose shared defaults are the small checkbox other lists use.
+  props.toggleCheckbox = false;
   props.toggleWidth = 48;
   props.toggleHeight = 26;
   props.toggleRadius = theme.capsuleRadius;
   props.toggleKnobRadius = theme.capsuleRadius;
   props.toggleKnobInset = 4;
   props.toggleBorderWidth = 2;
-  syncListViewport(screen, props);
   screen.list(props);
 }
 
@@ -528,6 +532,9 @@ void SettingsCategoryActivity::activateSetting(const SettingInfo& setting) {
         // Row labels are translated once in rebuildRows(), so a language
         // switch needs the rebuild.
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), rebuildHandler);
+        break;
+      case SettingAction::Plugins:
+        startActivityForResult(std::make_unique<PluginCatalogActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::KeyboardLayouts:
         if (auto activity = makeUniqueNoThrow<KeyboardLayoutsActivity>(renderer, mappedInput)) {

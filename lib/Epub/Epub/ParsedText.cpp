@@ -154,11 +154,36 @@ uint32_t countCodepoints(const std::string_view text) {
   return count;
 }
 
-bool hasCjkBreakOpportunityBetween(const uint32_t leftCp, const uint32_t rightCp) {
+bool cjkBoundaryAllowsBreak(const uint32_t leftCp, const uint32_t rightCp) {
   if (!utf8IsCjkBreakable(leftCp) && !utf8IsCjkBreakable(rightCp)) return false;
   if (isNoBreakAfterCjkPunctuation(leftCp) || isNoBreakBeforeCjkPunctuation(rightCp)) return false;
   if (utf8IsCombiningMark(rightCp)) return false;
   return true;
+}
+
+// Korean separates words with spaces, so a boundary touching Hangul is not a gap-less break inside
+// a line. hangulLineEndBreaks() still lets a Hangul word split there at a line end.
+bool hasCjkBreakOpportunityBetween(const uint32_t leftCp, const uint32_t rightCp) {
+  if (utf8IsHangul(leftCp) || utf8IsHangul(rightCp)) return false;
+  return cjkBoundaryAllowsBreak(leftCp, rightCp);
+}
+
+// Line-end split points inside a Hangul word, using the CJK boundary rules (no hyphen is drawn).
+std::vector<Hyphenator::BreakInfo> hangulLineEndBreaks(const std::string& word) {
+  std::vector<Hyphenator::BreakInfo> breaks;
+  if (word.empty()) return breaks;
+  const auto* const start = reinterpret_cast<const unsigned char*>(word.c_str());
+  const auto* ptr = start;
+  uint32_t prev = utf8NextCodepoint(&ptr);
+  while (*ptr) {
+    const size_t offset = static_cast<size_t>(ptr - start);
+    const uint32_t cur = utf8NextCodepoint(&ptr);
+    if ((utf8IsHangul(prev) || utf8IsHangul(cur)) && cjkBoundaryAllowsBreak(prev, cur)) {
+      breaks.push_back({offset, false});
+    }
+    prev = cur;
+  }
+  return breaks;
 }
 
 std::vector<size_t> cjkCharacterBreakByteOffsets(const std::string& text) {
@@ -688,16 +713,9 @@ int ParsedText::resolveFirstLineIndent(const bool isFirstLine, const GfxRenderer
   if (!isFirstLine || !isNaturalAlign) {
     return 0;
   }
-  if (blockStyle.textIndentDefined) {
-    if (blockStyle.textIndent < 0 || !extraParagraphSpacing) {
-      return blockStyle.textIndent;
-    }
-    return 0;
-  }
-  if (!extraParagraphSpacing) {
-    return scaleSpace(renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR), wordSpacingPercent) * 3;
-  }
-  return 0;
+  if (blockStyle.textIndentDefined && blockStyle.textIndent < 0) return blockStyle.textIndent;
+  if (paragraphIndentSpaces == 0) return 0;
+  return scaleSpace(renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR), wordSpacingPercent) * paragraphIndentSpaces;
 }
 
 // Opening punctuation that may precede a drop-cap initial (kept as part of the cap).
@@ -1426,14 +1444,12 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
       if (availableWidth > 0 &&
           hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths, allowFallbackBreaks)) {
         // Prefix now fits; append it to this line and move to next line
-        lineWidth += spacing + wordWidths[currentIndex];
         ++currentIndex;
         break;
       }
 
       // Could not split: force at least one word per line to avoid infinite loop
       if (currentIndex == lineStart) {
-        lineWidth += candidateWidth;
         ++currentIndex;
       }
       break;
@@ -1472,7 +1488,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   // Collect candidate breakpoints (byte offsets and hyphen requirements). Focus emphasis is a byte
   // annotation, so the hyphenator sees the whole word and every legal break is reachable.
-  auto breakInfos = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  // Hangul breaks come first so they win a tie against a hyphenated break at the same width.
+  auto breakInfos = hangulLineEndBreaks(word);
+  const auto hyphenBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  breakInfos.insert(breakInfos.end(), hyphenBreaks.begin(), hyphenBreaks.end());
   if (breakInfos.empty()) {
     return false;
   }

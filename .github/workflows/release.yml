@@ -78,15 +78,14 @@ jobs:
             "reedsolo>=1.5.3,<1.8" "esp-idf-size>=2.0.0" "esp-coredump>=1.14.0"
 
       - name: Pin pioarduino core inside the platform penv
+        env:
+          PIO_ENV: ${{ github.event.release.prerelease && matrix.rc_env || matrix.release_env }}
         run: |
           set -euo pipefail
-          # Envs with custom_sdkconfig run a nested `pio run` from ~/.platformio/penv,
-          # which the platform bootstraps with an open-ended "pioarduino>=6.1.19"
-          # (now 6.2.0). That core and the platform pin different tool-scons
-          # versions, which reinstall over each other mid-build ("No module named
-          # 'SCons.Tool.FortranCommon'"). Same fix as ci.yml (#3594).
+          # Envs with custom_sdkconfig run a nested `pio run` from
+          # ~/.platformio/penv. Keep that core on the same version as the outer core.
           # See https://github.com/pioarduino/platform-espressif32/issues/529
-          pio pkg install -e "${{ github.event.release.prerelease && matrix.rc_env || matrix.release_env }}"
+          pio pkg install -e "$PIO_ENV"
           uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
           ~/.platformio/penv/bin/pio --version
 

@@ -44,6 +44,8 @@ constexpr int kToolCount = 3;
 constexpr int kPanelHeightPercent = 62;
 // Cap the sheet may grow to when rounding the list area up to a whole row.
 constexpr int kPanelHeightMaxPercent = 72;
+// Landscape has less vertical room; leave a narrow page strip for tap-to-dismiss.
+constexpr int kLandscapePanelHeightPercent = 88;
 }  // namespace
 
 ReaderToolbarUi::ReaderToolbarUi(GfxRenderer& renderer) : UiAppHost(renderer) {}
@@ -192,7 +194,6 @@ void ReaderToolbarUi::buildHeader(UiScreen& screen) {
   constexpr int16_t kBatteryNubWidth = 2;  // the glyph's terminal nub past glyphWidth
   const int16_t batteryReserve =
       static_cast<int16_t>(metrics.batteryWidth + kBatteryNubWidth + (showPercent ? labelW + kBatteryGap : 0));
-  const bool batteryDetached = metrics.headerBatteryDetached;
   fui::BatteryIndicatorProps battery;
   battery.percent = static_cast<uint8_t>(percent > 100 ? 100 : percent);
   battery.charging = gpio.isUsbConnected();
@@ -201,9 +202,11 @@ void ReaderToolbarUi::buildHeader(UiScreen& screen) {
   battery.glyphWidth = static_cast<int16_t>(metrics.batteryWidth);
   battery.glyphHeight = static_cast<int16_t>(metrics.batteryHeight);
   battery.gap = kBatteryGap;
-  const int16_t batteryEdgeInset = batteryDetached ? 12 : tokens.headerSidePadding;
+  // Same corner as every other header: the status strip at the band's top,
+  // inset like BaseTheme::applyHeaderStatus().
+  const int16_t batteryEdgeInset = static_cast<int16_t>(BaseTheme::headerStatusInset());
   const int16_t batteryX = static_cast<int16_t>(band.right() - batteryEdgeInset - batteryReserve);
-  const int16_t batteryH = batteryDetached ? static_cast<int16_t>(metrics.batteryBarHeight) : bandH;
+  const int16_t batteryH = static_cast<int16_t>(metrics.batteryBarHeight);
   fui::batteryIndicator(screen.frame(), fui::Rect{batteryX, band.y, batteryReserve, batteryH}, battery);
 
   // Title, centred on the band both ways (the underline band excluded).
@@ -212,8 +215,9 @@ void ReaderToolbarUi::buildHeader(UiScreen& screen) {
     titleStyle.bold = true;
     titleStyle.align = fui::TextAlign::Center;
     const int16_t leftEdge = static_cast<int16_t>(band.x + tokens.headerSidePadding);
-    const int16_t rightEdge =
-        static_cast<int16_t>(batteryDetached ? band.right() - tokens.headerSidePadding : batteryX - tokens.spaceMd);
+    // The battery sits on the status strip above the title row, so the title
+    // may use the full band width.
+    const int16_t rightEdge = static_cast<int16_t>(band.right() - tokens.headerSidePadding);
     // Keep the title centred on the band when there is room, else on the gap.
     const int16_t maxW = static_cast<int16_t>(rightEdge - leftEdge);
     const int16_t titleW =
@@ -333,18 +337,22 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   const int16_t titleH = screen.target().lineHeight(tokens.titleText.font);
   const int16_t rowH =
       model_.denseRows ? static_cast<int16_t>(UITheme::getInstance().getMetrics().listRowHeight) : tokens.rowHeight;
-  const int16_t rowStride = static_cast<int16_t>(rowH + tokens.listRowGap);
+  const int16_t rowGap = model_.denseRows ? tokens.listRowGap : std::max(tokens.listRowGap, tokens.listTouchRowGap);
+  const int16_t rowStride = static_cast<int16_t>(rowH + rowGap);
   const int16_t grabberBand =
       static_cast<int16_t>(sheetProps.grabberMargin + sheetProps.grabberHeight + sheetProps.grabberInset);
   const int16_t chrome =
       static_cast<int16_t>(grabberBand + titleH + tokens.spaceMd + tokens.spaceSm + kToolRowH + tokens.spaceSm);
-  const int16_t target = static_cast<int16_t>((safe.height * kPanelHeightPercent) / 100);
-  const int16_t cap = static_cast<int16_t>((safe.height * kPanelHeightMaxPercent) / 100);
-  int sheetRows = (target - chrome + tokens.listRowGap) / rowStride;
-  if (static_cast<int16_t>(chrome + (sheetRows + 1) * rowStride - tokens.listRowGap) <= cap) ++sheetRows;
+  const bool landscape = safe.width > safe.height;
+  const int16_t target =
+      static_cast<int16_t>((safe.height * (landscape ? kLandscapePanelHeightPercent : kPanelHeightPercent)) / 100);
+  const int16_t cap =
+      static_cast<int16_t>((safe.height * (landscape ? kLandscapePanelHeightPercent : kPanelHeightMaxPercent)) / 100);
+  int sheetRows = (target - chrome + rowGap) / rowStride;
+  if (static_cast<int16_t>(chrome + (sheetRows + 1) * rowStride - rowGap) <= cap) ++sheetRows;
   if (model_.itemCount > 0 && sheetRows > model_.itemCount) sheetRows = model_.itemCount;
   if (sheetRows < 1) sheetRows = 1;
-  screen.sheet(sheetProps, static_cast<int16_t>(chrome + sheetRows * rowStride - tokens.listRowGap));
+  screen.sheet(sheetProps, static_cast<int16_t>(chrome + sheetRows * rowStride - rowGap));
   // No blanket side inset: Screen::list() draws in the content band, and the
   // scroll track must reach the sheet's edge like a full-screen list's does.
   // The title insets itself; the rows inset via rowInset below.
@@ -369,6 +377,10 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   listProps_.action = ACTION_ROW;
   listProps_.inputMask = fui::InputTouch;  // physical buttons stay with the reader
   listProps_.rowHeight = rowH;
+  listProps_.rowGap = rowGap;
+  listProps_.toggleCheckbox = true;
+  listProps_.toggleWidth = 28;
+  listProps_.toggleHeight = 28;
   // The label column starts flush with the panel title (no list-side padding
   // on top of the sheet's own inset). Body-size text: small reads condensed
   // and the taller row doubles as the tap target.
@@ -386,7 +398,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   nav_.selected = std::clamp(model_.selectedIndex, -1, count - 1);
   nav_.followOnBuild = nav_.selected >= 0;
   nav_.followPending = false;
-  nav_.syncToProps(listRect, listProps_.rowHeight, tokens.listRowGap, count, listProps_);
+  nav_.syncToProps(listRect, listProps_.rowHeight, rowGap, count, listProps_);
 
   // Materialise only the visible window of rows.
   const int windowCount = std::min({nav_.visibleRows, count - nav_.top, kMaxWindow});
@@ -397,6 +409,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
     fui::ListItem item;
     item.label = windowLabels_[i].c_str();
     item.value = windowValues_[i].empty() ? nullptr : windowValues_[i].c_str();
+    if (model_.rowCheckbox) model_.rowCheckbox(model_.rowCheckboxContext, index, item);
     item.actionValue = static_cast<int16_t>(index);
     windowItems_[i] = item;
   }

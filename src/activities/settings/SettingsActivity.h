@@ -28,6 +28,7 @@ enum class SettingAction {
   DownloadFonts,
   TextSettings,
   BatteryMonitor,
+  Plugins,
   KeyboardLayouts,
   HomeButton,
   About,

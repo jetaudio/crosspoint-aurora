@@ -42,6 +42,9 @@
 #ifndef HYPHENATION_LANG_UK
 #define HYPHENATION_LANG_UK 1
 #endif
+#ifndef HYPHENATION_LANG_PT
+#define HYPHENATION_LANG_PT 1
+#endif
 
 #if HYPHENATION_LANG_EN
 #include "generated/hyph-en.trie.h"
@@ -72,6 +75,9 @@
 #endif
 #if HYPHENATION_LANG_UK
 #include "generated/hyph-uk.trie.h"
+#endif
+#if HYPHENATION_LANG_PT
+#include "generated/hyph-pt.trie.h"
 #endif
 
 namespace {
@@ -107,11 +113,14 @@ LanguageHyphenator ukrainianHyphenator(uk_patterns, isCyrillicLetter, toLowerCyr
 #if HYPHENATION_LANG_PL
 LanguageHyphenator polishHyphenator(pl_patterns, isLatinLetter, toLowerLatin);
 #endif
+#if HYPHENATION_LANG_PT
+LanguageHyphenator portugueseHyphenator(pt_patterns, isLatinLetter, toLowerLatin);
+#endif
 
 constexpr size_t kLanguageCount = HYPHENATION_LANG_EN + HYPHENATION_LANG_FR + HYPHENATION_LANG_DE +
                                   HYPHENATION_LANG_RU + HYPHENATION_LANG_ES + HYPHENATION_LANG_IT +
                                   HYPHENATION_LANG_FI + HYPHENATION_LANG_PL + HYPHENATION_LANG_SV +
-                                  HYPHENATION_LANG_UK;
+                                  HYPHENATION_LANG_UK + HYPHENATION_LANG_PT;
 
 using EntryArray = std::array<LanguageEntry, kLanguageCount>;
 
@@ -146,6 +155,9 @@ const EntryArray& entries() {
 #endif
 #if HYPHENATION_LANG_UK
       {"ukrainian", "uk", &ukrainianHyphenator},
+#endif
+#if HYPHENATION_LANG_PT
+      {"portuguese", "pt", &portugueseHyphenator},
 #endif
   }};
   return kEntries;

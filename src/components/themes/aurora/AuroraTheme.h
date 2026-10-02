@@ -78,8 +78,10 @@ class AuroraTheme : public BaseTheme {
   // Aurora restyle of the shared list/header primitives so every screen that uses
   // them (reader menu, TOC, file browser, recent books, ...) gets the Aurora look:
   // a status-bar style header and rounded light-gray selected rows.
-  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
-                  const char* subtitle = nullptr) const override;
+  // backButton is ignored: Aurora sub-screens title their band "‹ Parent",
+  // which is itself the tap-to-go-back target (Activity::backHeader).
+  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
+                  bool backButton = true) const override;
   void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                 const std::function<std::string(int index)>& rowTitle,
                 const std::function<std::string(int index)>& rowSubtitle = nullptr,

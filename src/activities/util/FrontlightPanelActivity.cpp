@@ -439,15 +439,10 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
     // the mode names say what the tile is about on their own.
     const char* orientLabel =
         I18N.get(SCREEN_ORIENTATION_NAMES[SETTINGS.orientation % CrossPointSettings::ORIENTATION_COUNT]);
-    // "Touch On" / "Touch Off", from the existing state strings: the label
-    // names the current state of the touch-reader-controls setting.
     const bool touchOn = SETTINGS.touchReaderControls != CrossPointSettings::TOUCH_READER_OFF;
-    char touchLabel[48];
-    snprintf(touchLabel, sizeof(touchLabel), "%s %s", tr(STR_TOUCH_TOGGLE),
-             I18N.get(touchOn ? StrId::STR_STATE_ON : StrId::STR_STATE_OFF));
 
-    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE), tr(STR_FORCE_REFRESH),     orientLabel,
-                                      touchLabel,         tr(STR_SCREENSHOT_BUTTON), tr(STR_SLEEP)};
+    const char* labels[kTileCount] = {tr(STR_NIGHT_MODE),     tr(STR_FORCE_REFRESH),     orientLabel,
+                                      tr(STR_TOUCH_TOGGLE),   tr(STR_SCREENSHOT_BUTTON), tr(STR_SLEEP)};
     const fui::State states[kTileCount] = {
         SETTINGS.screenInverted ? fui::StateChecked : fui::StateNormal, fui::StateNormal, fui::StateNormal,
         // Filled when touch reader controls are OFF — the non-default,
@@ -459,12 +454,14 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
       gridItems[slot].label = labels[id];
       gridItems[slot].value = static_cast<int16_t>(id);
       gridItems[slot].state = states[id];
+      gridItems[slot].icon = id == 3 ? GUI.checkboxIcon(touchOn) : fui::BitmapRef{};
     }
     gridProps.items = gridItems;
     gridProps.count = static_cast<uint16_t>(tileCount);
     gridProps.action = ACTION_TILE;
     gridProps.tileHeight = kTileHeight;
     gridProps.gap = kTileGap;
+    gridProps.iconOnRight = true;
     screen.tileGrid(gridProps);
   }
 }

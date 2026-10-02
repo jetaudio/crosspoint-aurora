@@ -6,6 +6,10 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
+
+#include "src/activities/settings/TextSettingsPreview.h"
+#include "src/util/ParagraphIndentMigration.h"
 
 #define class struct
 #define private public
@@ -40,11 +44,11 @@ class ChapterHtmlSlimParserTest : public ::testing::TestWithParam<const char*> {
                                nullptr,
                                &cssParser};
 
-  void SetUp() override { parser.currentTextBlock = std::make_unique<ParsedText>(false); }
+  void SetUp() override { parser.currentTextBlock = std::make_unique<ParsedText>(); }
 };
 
 TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
-  ParsedText text(false);
+  ParsedText text;
   text.addWord("a", EpdFontFamily::REGULAR);
   text.addWord("b", EpdFontFamily::REGULAR);
   text.addWord("c", EpdFontFamily::REGULAR);
@@ -76,7 +80,7 @@ TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   parser.tableRowCells.reserve(2);
   std::multiset<std::string> expected;
   for (int column = 0; column < 2; ++column) {
-    auto cell = std::make_unique<ParsedText>(false);
+    auto cell = std::make_unique<ParsedText>();
     for (int index = 0; index < (column == 0 ? 30 : 3); ++index) {
       const auto word = std::string(column == 0 ? "left" : "right") + std::to_string(index);
       expected.insert(word);
@@ -198,7 +202,107 @@ TEST_F(ChapterHtmlSlimParserTest, DivWithHiddenAttributeContentShouldBeSkipped) 
   ASSERT_EQ(parser.partWordBufferIndex, 0);
 }
 
+TEST_F(ChapterHtmlSlimParserTest, PassesIndentSettingsToNewTextBlock) {
+  for (bool extraSpacing : {false, true}) {
+    parser.extraParagraphSpacing = extraSpacing;
+    parser.currentTextBlock.reset();
+    parser.setParagraphIndentSpaces(5);
+    parser.startNewTextBlock(BlockStyle());
+    ASSERT_NE(parser.currentTextBlock, nullptr);
+    EXPECT_EQ(parser.currentTextBlock->paragraphIndentSpaces, 5);
+  }
+}
+
 }  // namespace
+
+TEST(ParagraphIndentation, OverridesNonnegativeCssAndPreservesHangingIndent) {
+  GfxRenderer renderer;
+  for (int cssIndent : {-6, 0, 13}) {
+    for (uint8_t spaces : {0, 1, 2, 5}) {
+      BlockStyle style;
+      style.alignment = CssTextAlign::Left;
+      style.textIndentDefined = true;
+      style.textIndent = cssIndent;
+      ParsedText text(false, false, style, spaces);
+      text.addWord("word", EpdFontFamily::REGULAR);
+      bool sawLine = false;
+      text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
+        sawLine = true;
+        EXPECT_EQ(line->wordXpos(0), cssIndent < 0 ? cssIndent : 4 * spaces);
+      });
+      EXPECT_TRUE(sawLine);
+    }
+  }
+  for (uint8_t spaces : {0, 2}) {
+    BlockStyle style;
+    style.alignment = CssTextAlign::Left;
+    ParsedText text(false, false, style, spaces);
+    text.addWord("word", EpdFontFamily::REGULAR);
+    text.layoutAndExtractLines(
+        renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) { EXPECT_EQ(line->wordXpos(0), 4 * spaces); });
+  }
+}
+
+TEST(ParagraphIndentation, PreservesAlignmentEligibilityAndScaledSpaceRounding) {
+  GfxRenderer renderer;
+  for (const auto alignment : {CssTextAlign::Left, CssTextAlign::Center}) {
+    for (uint8_t spaces : {0, 2}) {
+      BlockStyle style;
+      style.alignment = alignment;
+      style.textIndentDefined = true;
+      style.textIndent = 0;
+      ParsedText text(false, false, style, spaces);
+      text.addWord("word", EpdFontFamily::REGULAR);
+      text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
+        if (alignment == CssTextAlign::Left)
+          EXPECT_EQ(line->wordXpos(0), 4 * spaces);
+        else
+          EXPECT_EQ(line->wordXpos(0), 84);
+      });
+    }
+  }
+  BlockStyle style;
+  style.alignment = CssTextAlign::Left;
+  ParsedText text(false, false, style, 2);
+  text.addWord("word", EpdFontFamily::REGULAR);
+  text.layoutAndExtractLines(
+      renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) { EXPECT_EQ(line->wordXpos(0), 6); }, true, 0, 75);
+}
+
+TEST(ParagraphIndentation, ReducesOnlyFirstLineAvailableWidth) {
+  GfxRenderer renderer;
+  BlockStyle style;
+  style.alignment = CssTextAlign::Left;
+  for (uint8_t spaces : {1, 2, 5}) {
+    ParsedText text(false, false, style, spaces);
+    text.addWord("ab", EpdFontFamily::REGULAR);
+    text.addWord("cd", EpdFontFamily::REGULAR);
+    unsigned lines = 0;
+    text.layoutAndExtractLines(renderer, 0, 40, [&](std::unique_ptr<TextBlock>, auto) { ++lines; });
+    EXPECT_EQ(lines, spaces == 1 ? 1u : 2u);
+  }
+}
+
+TEST(ParagraphIndentation, PreviewKeyTracksOffAndWidths) {
+  textsettings::PreviewKey off;
+  EXPECT_EQ(off.paragraphIndentSpaces, 2);
+  off.paragraphIndentSpaces = 0;
+  auto on = off;
+  on.paragraphIndentSpaces = 5;
+  EXPECT_NE(off, on);
+  on.paragraphIndentSpaces = 2;
+  EXPECT_NE(off, on);
+}
+
+TEST(ParagraphIndentation, MigratesLegacySettingsAndClampsWidths) {
+  EXPECT_EQ(migrateParagraphIndentSpaces(false, 0, true), 0);
+  EXPECT_EQ(migrateParagraphIndentSpaces(false, 0, false), 2);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 0, false), 0);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 2, true), 2);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 5, false), 5);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, -1, false), 0);
+  EXPECT_EQ(migrateParagraphIndentSpaces(true, 300, false), 5);
+}
 
 TEST(TextSpacingLayout, TrackingSeparatesCjkTokensAndScalesWordSpaces) {
   GfxRenderer renderer;
@@ -206,9 +310,9 @@ TEST(TextSpacingLayout, TrackingSeparatesCjkTokensAndScalesWordSpaces) {
     BlockStyle style;
     style.alignment = CssTextAlign::Left;
     style.textIndentDefined = true;
-    ParsedText text(false, hyphenation, false, style);
-    text.addWord("가나다", EpdFontFamily::REGULAR);
-    text.addWord("라마", EpdFontFamily::REGULAR);
+    ParsedText text(hyphenation, false, style, 0);
+    text.addWord("一二三", EpdFontFamily::REGULAR);
+    text.addWord("四五", EpdFontFamily::REGULAR);
     unsigned lines = 0;
     text.layoutAndExtractLines(
         renderer, 0, 200,
@@ -216,9 +320,9 @@ TEST(TextSpacingLayout, TrackingSeparatesCjkTokensAndScalesWordSpaces) {
           ++lines;
           ASSERT_EQ(line->wordCount(), 5);
           EXPECT_EQ(line->wordXpos(0), 0);
-          EXPECT_EQ(line->wordXpos(1), 7);  // 8 px syllable, -1 px tracking
+          EXPECT_EQ(line->wordXpos(1), 7);  // 8 px glyph, -1 px tracking
           EXPECT_EQ(line->wordXpos(2), 14);
-          EXPECT_EQ(line->wordXpos(3), 28);  // 8 px syllable plus 150% of a 4 px space, no tracking
+          EXPECT_EQ(line->wordXpos(3), 28);  // 8 px glyph plus 150% of a 4 px space, no tracking
           EXPECT_EQ(line->wordXpos(4), 35);
         },
         true, -1, 150);
@@ -234,7 +338,7 @@ TEST(TextSpacingLayout, WordSpacingChangesWrapThreshold) {
     BlockStyle style;
     style.alignment = CssTextAlign::Left;
     style.textIndentDefined = true;
-    ParsedText text(false, false, false, style);
+    ParsedText text(false, false, style, 0);
     text.addWord("ab", EpdFontFamily::REGULAR);
     text.addWord("cd", EpdFontFamily::REGULAR);
     unsigned lines = 0;
@@ -248,9 +352,9 @@ TEST(TextSpacingLayout, CachedPageRestoresSpacing) {
   BlockStyle style;
   style.alignment = CssTextAlign::Left;
   style.textIndentDefined = true;
-  ParsedText text(false, false, false, style);
-  text.addWord("가나다", EpdFontFamily::REGULAR);
-  text.addWord("라마", EpdFontFamily::REGULAR);
+  ParsedText text(false, false, style);
+  text.addWord("一二三", EpdFontFamily::REGULAR);
+  text.addWord("四五", EpdFontFamily::REGULAR);
   const auto path = (std::filesystem::temp_directory_path() / "crosspoint-text-spacing.bin").string();
   unsigned lines = 0;
   text.layoutAndExtractLines(
@@ -288,7 +392,7 @@ TEST_F(ChapterHtmlSlimParserTest, ParserAppliesTextSpacingToParagraphs) {
   parser.setTextSpacing(-1, 150);
   parser.beginParse();
   ChapterHtmlSlimParser::startElement(&parser, "p", nullptr);
-  const std::string text = "\xea\xb0\x80\xeb\x82\x98\xeb\x8b\xa4 \xeb\x9d\xbc\xeb\xa7\x88";  // 가나다 라마
+  const std::string text = "\xe4\xb8\x80\xe4\xba\x8c\xe4\xb8\x89 \xe5\x9b\x9b\xe4\xba\x94";  // 一二三 四五
   ChapterHtmlSlimParser::characterData(&parser, text.c_str(), static_cast<int>(text.size()));
   ChapterHtmlSlimParser::endElement(&parser, "p");
   parser.makePages();
@@ -300,8 +404,68 @@ TEST_F(ChapterHtmlSlimParserTest, ParserAppliesTextSpacingToParagraphs) {
     ++lines;
     ASSERT_EQ(block.wordCount(), 5);
     EXPECT_EQ(block.getBlockStyle().characterSpacing, -1);
-    EXPECT_EQ(block.wordXpos(1) - block.wordXpos(0), 7);   // 8 px syllable, -1 px tracking
-    EXPECT_EQ(block.wordXpos(3) - block.wordXpos(2), 14);  // syllable plus 150% of a 4 px space
+    EXPECT_EQ(block.wordXpos(1) - block.wordXpos(0), 7);   // 8 px glyph, -1 px tracking
+    EXPECT_EQ(block.wordXpos(3) - block.wordXpos(2), 14);  // glyph plus 150% of a 4 px space
   }
   EXPECT_EQ(lines, 1u);
+}
+
+TEST(KoreanLayout, HangulWordsStayWholeAndWrapAtSpaces) {
+  GfxRenderer renderer;
+  {
+    BlockStyle style;
+    style.alignment = CssTextAlign::Left;
+    style.textIndentDefined = true;
+    ParsedText text(false, false, style, 0);
+    text.addWord("가나다", EpdFontFamily::REGULAR);
+    text.addWord("라마", EpdFontFamily::REGULAR);
+    text.addWord("3개를", EpdFontFamily::REGULAR);
+    text.addWord("iPhone을", EpdFontFamily::REGULAR);
+    std::vector<std::vector<std::string>> lines;
+    text.layoutAndExtractLines(renderer, 0, 60, [&](std::unique_ptr<TextBlock> line, auto) {
+      auto& words = lines.emplace_back();
+      for (uint16_t i = 0; i < line->wordCount(); ++i) words.emplace_back(line->wordText(i));
+    });
+    // 가나다 라마 is 24 + 4 + 16 px; adding 3개를 would need 72 px, and no break exists inside it.
+    const std::vector<std::vector<std::string>> expected{{"가나다", "라마"}, {"3개를"}, {"iPhone을"}};
+    EXPECT_EQ(lines, expected);
+  }
+}
+
+TEST(KoreanLayout, JustifiedHangulStretchesOnlyWordSpaces) {
+  GfxRenderer renderer;
+  BlockStyle style;
+  style.alignment = CssTextAlign::Justify;
+  style.textIndentDefined = true;
+  ParsedText text(false, false, style, 0);
+  for (const char* word : {"가나", "다라", "마바", "사아"}) text.addWord(word, EpdFontFamily::REGULAR);
+  unsigned lines = 0;
+  text.layoutAndExtractLines(renderer, 0, 60, [&](std::unique_ptr<TextBlock> line, auto) {
+    if (lines++ != 0) return;
+    // 3 x 16 px words + 2 x 4 px spaces leave 4 px, split across the two spaces only.
+    ASSERT_EQ(line->wordCount(), 3);
+    EXPECT_EQ(line->wordXpos(0), 0);
+    EXPECT_EQ(line->wordXpos(1), 22);
+    EXPECT_EQ(line->wordXpos(2), 44);
+  });
+  EXPECT_EQ(lines, 2u);
+}
+
+TEST(KoreanLayout, HangulGluedAcrossInlineStyleIsUnbreakable) {
+  GfxRenderer renderer;
+  BlockStyle style;
+  style.alignment = CssTextAlign::Justify;
+  style.textIndentDefined = true;
+  ParsedText text(false, false, style);
+  text.addWord("가나", EpdFontFamily::REGULAR);
+  text.addWord("한국", EpdFontFamily::REGULAR);
+  text.addWord("어", EpdFontFamily::BOLD, false, /*attachToPrevious=*/true);
+  std::vector<std::vector<std::string>> lines;
+  text.layoutAndExtractLines(renderer, 0, 40, [&](std::unique_ptr<TextBlock> line, auto) {
+    auto& words = lines.emplace_back();
+    for (uint16_t i = 0; i < line->wordCount(); ++i) words.emplace_back(line->wordText(i));
+  });
+  // 가나 한국 fits in 36 px, but 어 is glued to 한국, so the whole word moves down.
+  const std::vector<std::vector<std::string>> expected{{"가나"}, {"한국", "어"}};
+  EXPECT_EQ(lines, expected);
 }

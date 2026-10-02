@@ -32,7 +32,6 @@ class CalibreConnectActivity final : public Activity {
 
   void onWifiSelectionComplete(bool connected);
   void startWebServer();
-  void stopWebServer();
 
  public:
   // The "‹" header is a touch Back target (see Activity::hasTouchBackHeader).

@@ -9,8 +9,9 @@ class RenderLock {
   bool isLocked = false;
 
  public:
-  explicit RenderLock();
-  explicit RenderLock(Activity&);  // unused for now, but keep for compatibility
+  enum class Mode { Blocking, Try };
+  explicit RenderLock(Mode mode = Mode::Blocking);
+  explicit RenderLock(Activity&);  // Activity argument retained for compatibility.
   // Bounded wait for a task that must not block forever on the render task (the reader's
   // background prefetch: the activity's destructor runs with this lock held and waits for it).
   struct TryFor {
@@ -21,6 +22,7 @@ class RenderLock {
   RenderLock(const RenderLock&) = delete;
   RenderLock& operator=(const RenderLock&) = delete;
   ~RenderLock();
+  bool ownsLock() const { return isLocked; }
   void unlock();
   static bool peek();
 };
